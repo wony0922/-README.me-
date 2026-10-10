@@ -1,0 +1,34 @@
+# ===== Unreal Engine (Blueprint project) =====
+# 엔진이 다시 생성하는 폴더 - 올리지 않음
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+Build/
+.vs/
+.vscode/
+.idea/
+
+# 플러그인 빌드 산출물
+Plugins/**/Binaries/
+Plugins/**/Intermediate/
+
+# 개인용 콘텐츠 폴더 (각자 테스트용)
+Content/Developers/
+Content/Collections/
+
+# IDE / OS 잡파일
+*.sln
+*.suo
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# 백업/임시
+*.tmp
+*.bak
+*~
