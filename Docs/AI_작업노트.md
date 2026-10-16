@@ -1,7 +1,7 @@
 # AI 작업노트 — Ore Deal (TeamProject)
 
 > 새 대화에서 Claude에게: "Docs/AI_작업노트.md 읽고 이어서 하자" 라고 하면 됩니다.
-> 마지막 갱신: 2026-10-14
+> 마지막 갱신: 2026-10-16
 
 ## 0. 환경
 - UE 5.8, 블루프린트 전용 프로젝트. 2~4인 LAN 멀티 보드/카드게임 (Listen Server).
@@ -32,17 +32,19 @@
 - PIE 월드끼리 액터 이름이 다를 수 있음(서버 C_0 ≠ 클라 C_0). HandCount 등으로 대응 확인.
 
 ## 3. 블루프린트 현황 (/Game/MaterialTraders/...)
-- **BP_GM_Table**: PlayerController=BP_PC_Table, PlayerState=BP_PS_Table. EndGame(bGameOver 가드)→모든 PC ClientShowResult. DebugEndGame(F9, 랜덤 골드). CheckRematch(전원 준비 시 servertravel Lvl_Table).
+- **BP_GM_Table**: PlayerController=BP_PC_Table, PlayerState=BP_PS_Table. BeginPlay: IsStandalone이면 OpenLevel(Lvl_MainMenu) (10/16, Lvl_Table 열린 채 Play해도 메인메뉴부터). EndGame(bGameOver 가드)→모든 PC ClientShowResult. DebugEndGame(F9, 랜덤 골드). CheckRematch(전원 준비 시 servertravel Lvl_Table).
 - **BP_PS_Table**: Gold, Wood(int, Replicated), bReadyRematch. AddGold(Amount).
 - **BP_PC_Table**: BeginPlay(로컬이면 GameOnly 입력 + WBP_HUD 생성). 키 A/D=MoveFocus(-1/+1), Space=PressSpace, F9=디버그 종료.
   - Focus 0,1=펼친카드, 2,3=마차. PressSpace: 펼친카드 선택/해제, 마차에서 선택카드 있으면 ServerPlace(true,…) 없으면 손패 맨왼쪽 ServerPlace(false,…).
   - RPC: ClientShowResult(소유클라), ServerReadyRematch/ServerDebugEndGame/ServerPlace(서버, reliable; bool 파라미터 NewParam=FromReveal, NewParam2=Reveal1, NewParam3=Wagon1).
   - DoPlace: 내 보드 찾기(FindMyBoard: 폰과 가장 가까운 보드) → 펼친카드 or 손패[0] → board.AddCard → 덱 RevealIfEmpty.
-- **BP_CardBoard**(마차 2칸): WagonTypes/WagonCounts(RepNotify→UpdateVisual). AddCard: 같은 종류면 +1, 다르면 기존 청산(개수≥MinSellCount(2)면 개수×SellPrice 골드, 아니면 무덤) 후 새 카드 1장. SellPrice [1,2,4,3,6] (Stone,Coal,Gold,Iron,Diamond 순 FloatMats 기준). WagonPivot0/1 = (0, ±8, 14), 카메라 바라보게 회전(FacePivots). 레벨 배치: CardBoard_0~3 (SeatIndex 0~3, 폴더 Table/Boards).
-- **BP_CardDeck**: RevealedCards[2](RepNotify), RevealTwo/TakeReveal/RevealIfEmpty, 펼친 카드 2장 덱 위 부유(왼쪽=Reveal0). 덱 본체(DeckBody/TopCard/TopCardBack)는 10/13에 1.5배 확대(DeckBody 스케일 0.0945×0.132×0.039). 레벨에 1개(CardDeck).
+- **BP_RoundTable**(레벨 RoundTable): TableMesh(bar_table, 원본 정사각형 55.88) 인스턴스 스케일 1.65×2×0.6이라 Y가 길었음 → 10/16 **액터 스케일 Y 0.825**로 원형 맞춤(실제 반경 92.2). 컴포넌트 스케일을 툴로 바꾸면 컨스트럭션 재실행으로 되돌아가서 액터 스케일로 처리. 의자 ±119, 마차판 ±70은 원래 대칭.
+- **BP_CardBoard**(마차 2칸): WagonTypes/WagonCounts(RepNotify→UpdateVisual). AddCard: 같은 종류면 +1, 다르면 기존 청산(개수≥MinSellCount(2)면 개수×SellPrice 골드, 아니면 무덤) 후 새 카드 1장. SellPrice [1,2,4,3,6] (Stone,Coal,Gold,Iron,Diamond 순 FloatMats 기준). WagonPivot0/1 = (0, ±8, 14), 카메라 바라보게 회전(FacePivots). 레벨 배치: CardBoard_0~3 (SeatIndex 0~3, 폴더 Table/Boards). 10/16: 부유 카드 그림이 90° 누워 있던 것 수정 → WagonCard/RevealCard/Glow 회전 **(P0,Y-90,R90)** ((0,90,-90)은 거꾸로였음) 스케일 (0.085,0.119,1), Glow (0.1,0.134,1). 덱·마차판 5개 재배치함.
+- **BP_CardDeck**: RevealedCards[2](RepNotify), RevealTwo/TakeReveal/RevealIfEmpty, 펼친 카드 2장 덱 위 부유(왼쪽=Reveal0). 덱 본체는 10/16에 원본의 3배(=10/13 1.5배의 2배): DeckBody 위치 z3.9 스케일 0.189×0.264×0.078, TopCard (0.45,-0.3,7.86) 0.189×0.264×0.002, TopCardBack z **8.0**(TopCard 윗면 7.96보다 높아야 보임). 레벨에 1개(CardDeck, 폴더 Table, yaw 18). ※ 10/13 변경은 레벨 인스턴스에 반영 안 돼 있었음.
 - **BP_SeatedPlayer**(폰): CharacterMesh(몸통 SM_Char_Body) + 자식 HeadMesh(SM_Char_Head, 목 기준 피벗, 상대위치 z39). 스킨: CharacterMeshes/HeadMeshes 배열[Player1, Player2], OnRep_SkinIndex에서 교체.
   - 머리 회전: Tick에서 로컬이면 LookRot=Delta(ControlRot, ActorRot) → ServerSetLook(서버 RPC, Rotator) → ApplyHead. 원격은 복제된 LookRot로 ApplyHead. 범위 좌우 ±80, 위 30/아래 35.
   - 왼손(CardFan)은 사용자가 왼쪽으로 옮김.
+  - 10/16 손·카드 2배: 애니(StartDrawAnim/TickDrawAnim/ApplyEmote)가 CardFan·RightHandRoot·FlyCard에 MakeTransform(스케일 1)을 SetRelativeTransform하므로 **부모는 건드리지 말고 자식만 스케일**. LeftHand 스케일 2 + 위치 ×2(2.808,-3.49,-3.55), CardSlots 2, RightHand 2, FlyCard 아래 새 Scene **FlyCardScale**(스케일 2)에 FlyCardBody/Front/Back 재부모. 덱·펼친 카드·마차 카드는 1배 그대로.
 - **UI**: WBP_Result(순위/한 판 더/메인메뉴), WBP_HUD(우상단 나무/골드, Tick에서 RefreshHUD). 아이콘 T_Icon_Wood/Gold (원본 SourceArt/UI).
 - 머티리얼: M_CardGlow(흰 테두리), M_CardFloat + MI_CardFloat_* (부유 카드, 언릿).
 
@@ -57,7 +59,7 @@
 - 주의: 내 시점에선 착지점이 시야 아래(약 45°)라 내려다봐야 보임. 손패 기본값 HandCards=[0..4]라 모드1은 손패가 0장일 때만.
 
 ## 3-2. 게임 시작 흐름 (10/14)
-- PIE 설정: 넷 모드 **Standalone**, 플레이어 2 (Lvl_MainMenu 열고 Play → 한쪽 "방 만들기", 다른 쪽 "방 참가"→방 선택).
+- PIE 설정: 넷 모드 **Standalone**, 플레이어 2 (어느 레벨에서 Play해도 메인메뉴로 감 → 한쪽 "방 만들기", 다른 쪽 "방 참가"→방 선택).
 - 대기 상태: BP_CardDeck.**bGameStarted**(Replicated)=false. WBP_HUD 하단 StartPanel — 방장(PC HasAuthority)은 "▶ 게임 시작 [SPACE]", 나머지는 "방장이 게임을 시작하기를 기다리는 중...", 아래 "접속 인원 n / 4 (최소 2명)". 시작되면 숨김 (RefreshHUD에서 매 틱 갱신).
 - 손패 기본값 비움(HandCards=[], HandCount=0).
 - PC PressSpace 맨 앞: 시작 전이면 방장만 GM.**StartGame** 호출(시작 후엔 기존 Space 로직).
@@ -70,12 +72,14 @@
 - PC.**IsMyTurn**() = Deck.TurnPS == 내 PlayerState. 턴 아닐 때 막힘: PressSpace(시작 후), MoveFocus(A/D), W(드로우 테스트). 마우스 시야·이모트는 항상 가능.
 - 임시 턴 넘기기: **E** → ServerEndTurn(커스텀 이벤트, **서버에서 실행 설정 필요**) → GM.EndTurn. 실제 룰 생기면 그 시점에 EndTurn 호출로 교체.
 - HUD 상단 TxtTurn: "▶ 내 턴 · E: 턴 넘기기" / "다른 플레이어의 턴 · 시야 회전 / 이모트(휠 클릭)만 가능" (시작 후만).
-- 이모트 휠: 폰에서 **마우스 가운데 버튼** 누름 → WBP_EmoteWheel(상/우/하/좌 4칸, 상=가리키기) 생성, 누르는 동안 IA_MouseLook 값을 시야 대신 WheelUpdate(DX,DY)로 누적(±60, 15 이상이면 선택; IMC_MouseLook Y가 Negate라 **위=DY<0**), 떼면 선택=0이면 EmoteTime=3초.
+- 이모트 휠: 폰에서 **마우스 가운데 버튼** 누름 → WBP_EmoteWheel(도넛 4분할, 상=가리키기, 우=비하하기, 하=엄지척) 생성, 누르는 동안 IA_MouseLook 값을 시야 대신 WheelUpdate(DX,DY)로 누적(±60, 15 이상이면 선택; IMC_MouseLook Y가 Negate라 **위=DY<0**), 떼면 선택=0이면 EmoteTime=3초.
 - 이모트 동기화: 별도 RPC 없이 **LookRot.Roll**에 실어 보냄(EmoteTime>0이면 Roll=90) → ServerSetLook으로 서버 → LookRot 복제. ApplyEmote(Tick, 모든 머신): |Roll|>45면 RightHand에 SK_Hand_RPoint 재생 + RightHandRoot를 시선(LookRot pitch±45/yaw±80) 기준 위치(카메라 앞 38, 오른쪽 24, 아래 8, 회전 +yaw-10/pitch5)로 Lerp, 끝나면 RHHome(BeginPlay에서 저장)으로 복귀. 드로우 애니 중엔 건너뜀.
+- 10/16 이모트 확장: 휠 = 도넛 4분할(WBP_EmoteWheel의 Border SlotUp/Right/Down/Left 배경을 T_EmoteSeg_* 링 조각 텍스처(440, SourceArt/UI에서 생성)로, 위에 Image RingLines(테두리선), 글자는 RenderTransform ±150 이동). SetSelected(BrushColor 틴트) 그대로.
+  - 휠: 위(0)=가리키기, 오른쪽(1)=**비하하기**(엄지 아래), 아래(2)=**엄지척**. 떼면 InRange(WheelSel,0,2)이면 EmoteTime=3 + **EmoteKind**=WheelSel. Roll = EmoteTime>0 ? (Kind0:90 / Kind1:**160** / Kind2:**-160**) : 0.
+  - ApplyEmote: |Roll|>=135 → bThumbShown → SK_Hand_RThumbsUp(기존 에셋, Blender R_ThumbsUp) 재생. 손 오프셋 회전: Roll<0이면 MakeRotator(R**90**,P5,Y-10)=엄지 위, 아니면 (R**-90**)=엄지 아래, 가리키기는 R0. 위치·시야 따라오기는 가리키기와 동일.
 - 손가락질 애니: Blender Rig_R 액션 R_Point(R_Fist 복사 + 검지=Finger3 펴기) → Export\SK_Hand_RPoint.fbx → /Game/Asset/Hands/SK_Hand_RPoint.
 
 ## 4. 캐릭터 모델 (Blender → UE)
-- **언리얼은 반드시 git 클론의 TeamProject.uproject로 열 것** (10/13 OneDrive 옛 사본을 열어서 작업이 사라진 것처럼 보였음).
 - GameVR.blend 컬렉션 `CharSplit`: SM_Character_Round(정수리 둥글게, 키 0.782→0.767), SM_Char_Body, SM_Char_Head, SM_Char_Head_Blush. 원본 SM_Character는 그대로.
   - 목 z 0.39에서 분리, 잘린 면은 양쪽 모두 둥근 돔 캡(반경×0.6)으로 닫음. 머리 원점 = 목 중심. Subsurf 1 적용해서 내보내기.
   - 홍조(M_Blush): 기본 머리에 납작한 타원 2개(볼, x ±0.112, z 0.525)를 추가해 새로 만든 것.
