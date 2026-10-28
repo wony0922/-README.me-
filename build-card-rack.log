@@ -1,0 +1,33 @@
+Using bundled DotNet SDK version: 10.0 win-x64
+Running UnrealBuildTool: dotnet "..\..\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.dll" TeamProjectEditor Win64 Development "-Project=C:\Unreal Projects\Ore Deal\-README.me-\TeamProject.uproject" -WaitMutex -MaxParallelActions=4
+Log file: C:\Users\sayra\AppData\Local\Packages\sandbox.{e049f4d8-738d-4910-b1ec-2ac824ee31cf}\AC\UnrealBuildTool\Log.txt
+Executing up to 4 actions based on MaxProcessorCount override
+Using 'git status' to determine working set for adaptive non-unity build (C:\Unreal Projects\Ore Deal\-README.me-).
+UbaServer - Listening on 0.0.0.0:1345
+UHT compiled-in object format Default
+UHT processed TeamProjectEditor in 7.3477836 seconds (3 generated files written)
+Building TeamProjectEditor...
+===== Toolchain Information =====
+Using ISPC compiler (C:\Program Files\Epic Games\UE_5.8\Engine\Source\ThirdParty\Intel\ISPC\bin\Windows\ispc.exe)
+  Intel(r) Implicit SPMD Program Compiler (Intel(r) ISPC), 1.24.0 (build commit  @ 20250404, LLVM 18.1.2) 
+Using Visual Studio 14.44.35220 toolchain (C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207) and Windows 10.0.26100.0 SDK (C:\Program Files (x86)\Windows Kits\10).
+===== End Toolchain Information =====
+Using Unreal Build Accelerator local executor to run 11 action(s)
+  CPU 8 physical cores, 8 logical cores
+  Memory 15.54 GB physical, 27.11 GB/31.29 GB committed
+  UBA Storage capacity 40 GB
+[1/11] Compile [x64] Module.TeamProject.gen.cpp
+[2/11] Compile [x64] OreDealInteractionWidget.cpp
+[3/11] Compile [x64] OreDealTablePlayerController.cpp
+[4/11] Compile [x64] OreDealTradeManager.cpp
+[5/11] Compile [x64] OreDealTurnBridge.cpp
+[6/11] Compile [x64] PerModuleInline.gen.cpp
+[7/11] Compile [x64] TeamProject.cpp
+[8/11] Link [x64] UnrealEditor-TeamProject.lib
+   C:/Unreal Projects/Ore Deal/-README.me-/Intermediate/Build/Win64/x64/UnrealEditor/Development/TeamProject/UnrealEditor-TeamProject.lib 라이브러리 및 C:/Unreal Projects/Ore Deal/-README.me-/Intermediate/Build/Win64/x64/UnrealEditor/Development/TeamProject/UnrealEditor-TeamProject.exp 개체를 생성하고 있습니다.
+UbaSessionServer - ERROR opening file C:\Unreal Projects\Ore Deal\-README.me-\Binaries\Win64\UnrealEditor-TeamProject.dll for write after retrying for 20 seconds (The process cannot access the file because it is being used by another process.)
+Link [x64] UnrealEditor-TeamProject.dll: Exited with error code 9001. This action will retry without UBA
+[9/11] Compile Resource [x64] Default.rc2
+[10/11] Link [x64] UnrealEditor-TeamProject.dll [NoUba]
+LINK : fatal error LNK1104: 'C:\Unreal Projects\Ore Deal\-README.me-\Binaries\Win64\UnrealEditor-TeamProject.dll' ￆￄ￀ￏ￀ﾻ ﾿ﾭ ﾼ￶ ﾾ￸ﾽ￀ﾴￏﾴ￙.
+Some action result store tasks did not succeed
