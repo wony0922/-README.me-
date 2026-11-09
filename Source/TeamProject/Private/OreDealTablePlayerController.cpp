@@ -43,6 +43,20 @@ namespace
 		return Reward;
 	}
 
+	bool CanSellSingleCardSlot(FScriptArrayHelper& Counts, const FIntProperty* CountsInner, int32 WagonIndex)
+	{
+		if (!Counts.IsValidIndex(WagonIndex) || !CountsInner || CountsInner->GetPropertyValue(Counts.GetRawPtr(WagonIndex)) != 1) return false;
+		int32 OccupiedWagons = 0;
+		for (int32 I = 0; I < Counts.Num(); ++I)
+		{
+			const int32 Count = CountsInner->GetPropertyValue(Counts.GetRawPtr(I));
+			if (Count <= 0) continue;
+			if (Count != 1) return false;
+			++OccupiedWagons;
+		}
+		return OccupiedWagons == 2;
+	}
+
 	UClass* LoadBlueprintClass(const TCHAR* Path)
 	{
 		return StaticLoadClass(AActor::StaticClass(), nullptr, Path);
@@ -72,11 +86,10 @@ namespace
 		return DeckClass ? UGameplayStatics::GetActorOfClass(World, DeckClass) : nullptr;
 	}
 
-	bool IsRackAtLocalSeat(UWorld* World, APawn* Pawn, AActor* ClickedRack)
+	bool IsRackAtLocalSeat(UWorld* World, AActor* LocalBoard, AActor* ClickedRack)
 	{
-		if (!World || !Pawn || !ClickedRack) return false;
-		AActor* LocalBoard = FindBoardForPawn(World, Pawn);
-		if (!LocalBoard || ClickedRack == LocalBoard) return false;
+		if (!World || !LocalBoard || !ClickedRack) return false;
+		if (ClickedRack == LocalBoard) return false;
 		UClass* BoardClass = LoadBlueprintClass(TEXT("/Game/MaterialTraders/Blueprints/BP_CardBoard.BP_CardBoard_C"));
 		if (!BoardClass) return false;
 		TArray<AActor*> Boards;
@@ -97,9 +110,9 @@ namespace
 		return NearestBoard == LocalBoard && (bExplicitRack || FVector::DistSquared(ClickedRack->GetActorLocation(), LocalBoard->GetActorLocation()) <= FMath::Square(SeatRadius));
 	}
 
-	bool IsRackCandidateAtLocalSeat(UWorld* World, APawn* Pawn, AActor* Actor)
+	bool IsRackCandidateAtLocalSeat(UWorld* World, AActor* LocalBoard, AActor* Actor)
 	{
-		if (!IsValid(Actor) || !IsRackAtLocalSeat(World, Pawn, Actor)) return false;
+		if (!IsValid(Actor) || !IsRackAtLocalSeat(World, LocalBoard, Actor)) return false;
 		if (Actor->ActorHasTag(TEXT("OreDealCardRack")) || Actor->GetName().Contains(TEXT("Rack"), ESearchCase::IgnoreCase)) return true;
 		TArray<UActorComponent*> Components;
 		Actor->GetComponents(Components);
@@ -136,6 +149,7 @@ AOreDealTablePlayerController::AOreDealTablePlayerController()
 void AOreDealTablePlayerController::BeginPlay()
 {
 	Super::BeginPlay();
+	GetPlayerBoard();
 	if (HasAuthority() && GetWorld())
 	{
 		MarketBroker = Cast<AOreDealMarketBroker>(UGameplayStatics::GetActorOfClass(GetWorld(), AOreDealMarketBroker::StaticClass()));
@@ -171,8 +185,17 @@ void AOreDealTablePlayerController::BeginPlay()
 	}
 }
 
+AActor* AOreDealTablePlayerController::GetPlayerBoard() const
+{
+	if (CachedPlayerBoard.IsValid()) return CachedPlayerBoard.Get();
+	AActor* Board = FindBoardForPawn(GetWorld(), GetPawn());
+	if (IsValid(Board)) CachedPlayerBoard = Board;
+	return Board;
+}
+
 void AOreDealTablePlayerController::PlayerTick(float DeltaTime)
 {
+	GetPlayerBoard();
 	// Some Blueprint controllers become locally owned after BeginPlay in PIE/network
 	// startup. Retry creation here so a late local-player assignment cannot leave the
 	// interaction HUD permanently missing.
@@ -345,9 +368,9 @@ bool AOreDealTablePlayerController::InputKey(const FInputKeyEventArgs& Params)
 				ToggleSalesMenu();
 				return true;
 			}
-			if (HitActor && IsRackCandidateAtLocalSeat(GetWorld(), GetPawn(), HitActor))
+			if (HitActor && IsRackCandidateAtLocalSeat(GetWorld(), GetPlayerBoard(), HitActor))
 			{
-				if (IsRackAtLocalSeat(GetWorld(), GetPawn(), Hit.GetActor())) ToggleHandRack(HitActor);
+				if (IsRackAtLocalSeat(GetWorld(), GetPlayerBoard(), Hit.GetActor())) ToggleHandRack(HitActor);
 				return true;
 			}
 			if (HitActor == FindCardDeck(GetWorld()))
@@ -475,7 +498,7 @@ void AOreDealTablePlayerController::ToggleHandRack(AActor* RackActor)
 		TArray<int32> Cards;
 		GetLocalHandCards(Cards);
 		InteractionWidget->RefreshHandCards(Cards);
-		AActor* PositionActor = RackActor ? RackActor : FindBoardForPawn(GetWorld(), GetPawn());
+		AActor* PositionActor = RackActor ? RackActor : GetPlayerBoard();
 		int32 ViewportWidth = 0;
 		int32 ViewportHeight = 0;
 		GetViewportSize(ViewportWidth, ViewportHeight);
@@ -559,8 +582,7 @@ void AOreDealTablePlayerController::GetSaleOptionText(int32 WagonIndex, FString&
 	OutText.Reset();
 	bOutCanSell = false;
 	APlayerState* PS = PlayerState;
-	APawn* MyPawn = GetPawn();
-	AActor* Board = FindBoardForPawn(GetWorld(), MyPawn);
+	AActor* Board = GetPlayerBoard();
 	AActor* Deck = FindCardDeck(GetWorld());
 	int32 Phase = INDEX_NONE;
 	if (!Board || !IsPlayersTurn(Deck, PS, Phase) || Phase < 0 || Phase > 2)
@@ -584,10 +606,7 @@ void AOreDealTablePlayerController::GetSaleOptionText(int32 WagonIndex, FString&
 		return;
 	}
 	const int32 Reward = SaleReward(Resource, Count);
-	bool bAnyWagonHasTwoOrMore = false;
-	for (int32 I = 0; I < Counts.Num(); ++I)
-		if (CountsInner->GetPropertyValue(Counts.GetRawPtr(I)) >= 2) { bAnyWagonHasTwoOrMore = true; break; }
-	bOutCanSell = Count >= 2 || !bAnyWagonHasTwoOrMore;
+	bOutCanSell = Count >= 2 || CanSellSingleCardSlot(Counts, CountsInner, WagonIndex);
 	OutText = FString::Printf(TEXT("마차 %d · %s X %d개 · 보상 %dG%s"), WagonIndex + 1, ResourceNames[Resource], Count, Reward, Reward == 0 ? TEXT(" (0G 정산 가능)") : TEXT(""));
 }
 
@@ -642,7 +661,7 @@ void AOreDealTablePlayerController::ServerSellWagon_Implementation(int32 WagonIn
 	AActor* Deck = FindCardDeck(GetWorld());
 	int32 Phase = INDEX_NONE;
 	if (!PS || WagonIndex < 0 || WagonIndex >= 3 || !IsPlayersTurn(Deck, PS, Phase) || Phase < 0 || Phase > 2) return;
-	AActor* Board = FindBoardForPawn(GetWorld(), GetPawn());
+	AActor* Board = GetPlayerBoard();
 	if (!Board) return;
 	const FArrayProperty* TypesProp = FindFProperty<FArrayProperty>(Board->GetClass(), TEXT("wagonTypes"));
 	const FArrayProperty* CountsProp = FindFProperty<FArrayProperty>(Board->GetClass(), TEXT("wagonCounts"));
@@ -656,10 +675,7 @@ void AOreDealTablePlayerController::ServerSellWagon_Implementation(int32 WagonIn
 	const int32 Resource = TypesInner->GetPropertyValue(Types.GetRawPtr(WagonIndex));
 	const int32 Count = CountsInner->GetPropertyValue(Counts.GetRawPtr(WagonIndex));
 	if (Resource < 0 || Resource >= UE_ARRAY_COUNT(ResourceNames) || Count <= 0) return;
-	bool bAnyWagonHasTwoOrMore = false;
-	for (int32 I = 0; I < Counts.Num(); ++I)
-		if (CountsInner->GetPropertyValue(Counts.GetRawPtr(I)) >= 2) { bAnyWagonHasTwoOrMore = true; break; }
-	if (Count < 2 && bAnyWagonHasTwoOrMore) return;
+	if (Count < 2 && !CanSellSingleCardSlot(Counts, CountsInner, WagonIndex)) return;
 	const int32 Reward = SaleReward(Resource, Count);
 	TypesInner->SetPropertyValue(Types.GetRawPtr(WagonIndex), INDEX_NONE);
 	CountsInner->SetPropertyValue(Counts.GetRawPtr(WagonIndex), 0);
@@ -799,7 +815,7 @@ bool AOreDealTablePlayerController::TraceCenterPointer(FHitResult& OutHit) const
 	{
 		if (!IsValid(Actor)) return false;
 		if (Actor->ActorHasTag(TEXT("OreDealMerchant")) || Actor->ActorHasTag(TEXT("OreDealCardRack"))) return true;
-		if (IsRackCandidateAtLocalSeat(GetWorld(), GetPawn(), Actor)) return true;
+		if (IsRackCandidateAtLocalSeat(GetWorld(), GetPlayerBoard(), Actor)) return true;
 		return Actor == FindCardDeck(GetWorld());
 	};
 	if (World->LineTraceSingleByChannel(OutHit, RayOrigin, RayEnd, ECC_Visibility, QueryParams) && IsInteractive(OutHit.GetActor())) return true;
@@ -816,7 +832,7 @@ bool AOreDealTablePlayerController::TraceCenterPointer(FHitResult& OutHit) const
 	UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), NearbyActors);
 	for (AActor* Candidate : NearbyActors)
 	{
-		if (IsRackCandidateAtLocalSeat(World, GetPawn(), Candidate)) Candidates.AddUnique(Candidate);
+		if (IsRackCandidateAtLocalSeat(World, GetPlayerBoard(), Candidate)) Candidates.AddUnique(Candidate);
 	}
 	if (AActor* Deck = FindCardDeck(World)) Candidates.AddUnique(Deck);
 	float NearestDistance = TNumericLimits<float>::Max();
@@ -843,9 +859,12 @@ int32 AOreDealTablePlayerController::GetCardFocusIndex(const FHitResult& Hit) co
 {
 	AActor* HitActor = Hit.GetActor();
 	if (!HitActor) return INDEX_NONE;
-	AActor* LocalBoard = FindBoardForPawn(GetWorld(), GetPawn());
+	int32 Phase = INDEX_NONE;
+	AActor* Deck = FindCardDeck(GetWorld());
+	if (!IsPlayersTurn(Deck, PlayerState, Phase)) return INDEX_NONE;
+	AActor* LocalBoard = GetPlayerBoard();
 	const bool bOwnBoard = HitActor == LocalBoard;
-	const bool bPublicDeck = HitActor == FindCardDeck(GetWorld());
+	const bool bPublicDeck = HitActor == Deck;
 	if (!bOwnBoard && !bPublicDeck) return INDEX_NONE;
 	const UPrimitiveComponent* Component = Hit.GetComponent();
 	if (!Component)

@@ -36,6 +36,19 @@ namespace
 			if (Item.Resource.IsNone() || Item.Amount <= 0) return false;
 		return true;
 	}
+
+	bool CanSellSingleCardWagon(const TArray<FTradeWagon>& Wagons, int32 WagonIndex)
+	{
+		if (!Wagons.IsValidIndex(WagonIndex) || Wagons[WagonIndex].Amount != 1) return false;
+		int32 OccupiedWagons = 0;
+		for (const FTradeWagon& Wagon : Wagons)
+		{
+			if (Wagon.Amount <= 0) continue;
+			if (Wagon.Amount != 1) return false;
+			++OccupiedWagons;
+		}
+		return OccupiedWagons == 2;
+	}
 }
 
 AOreDealTradeManager::AOreDealTradeManager()
@@ -279,7 +292,7 @@ bool AOreDealTradeManager::PlantQueueFront(FName PlayerId, int32 WagonIndex)
 	else if (Target == INDEX_NONE) Target = Sim.IndexOfByPredicate([](const FTradeWagon& W) { return W.Amount == 0; });
 	if (Target != INDEX_NONE && Sim[Target].Amount > 0 && Sim[Target].Resource != Resource)
 	{
-		if (!HarvestWagonInternal(Index, Target, true)) return false;
+		if (!HarvestWagonInternal(Index, Target)) return false;
 		Sim = Players[Index].Wagons;
 	}
 	if (Target == INDEX_NONE)
@@ -299,7 +312,7 @@ bool AOreDealTradeManager::PlantQueueFront(FName PlayerId, int32 WagonIndex)
 			}
 			if (FindRule(Wagon.Resource) != INDEX_NONE) { Target = Candidate; break; }
 		}
-		if (Target == INDEX_NONE || !HarvestWagonInternal(Index, Target, true)) return false;
+		if (Target == INDEX_NONE || !HarvestWagonInternal(Index, Target)) return false;
 		Sim = Players[Index].Wagons;
 	}
 	if (Target == INDEX_NONE) return false;
@@ -435,25 +448,18 @@ bool AOreDealTradeManager::HarvestWagon(FName PlayerId, int32 WagonIndex)
 {
 	if (!HasAuthority() || bGameOver || PlayerId != ActivePlayer || TurnPhase != EOreDealTurnPhase::SlotPlacement) return false;
 	const int32 Index = FindPlayer(PlayerId);
-	return Index != INDEX_NONE && HarvestWagonInternal(Index, WagonIndex, false);
+	return Index != INDEX_NONE && HarvestWagonInternal(Index, WagonIndex);
 }
 
-bool AOreDealTradeManager::HarvestWagonInternal(int32 PlayerIndex, int32 WagonIndex, bool bAllowBelowMinimum)
+bool AOreDealTradeManager::HarvestWagonInternal(int32 PlayerIndex, int32 WagonIndex)
 {
 	if (!Players.IsValidIndex(PlayerIndex) || !Players[PlayerIndex].Wagons.IsValidIndex(WagonIndex)) return false;
 	FTradeWagon& Wagon = Players[PlayerIndex].Wagons[WagonIndex];
 	if (Wagon.Amount <= 0 || Players[PlayerIndex].Supplies < HarvestSupplyCost) return false;
-	if (Wagon.Amount == 1)
-		for (int32 I = 0; I < Players[PlayerIndex].Wagons.Num(); ++I)
-			if (Players[PlayerIndex].Wagons[I].Amount >= 2) return false;
+	if (Wagon.Amount == 1 && !CanSellSingleCardWagon(Players[PlayerIndex].Wagons, WagonIndex)) return false;
 	const int32 RuleIndex = FindRule(Wagon.Resource);
 	if (RuleIndex == INDEX_NONE) return false;
 	const FOreDealResourceRule& Rule = ResourceRules[RuleIndex];
-	if (!bAllowBelowMinimum && Wagon.Amount < 2)
-	{
-		for (const FTradeWagon& OtherWagon : Players[PlayerIndex].Wagons)
-			if (OtherWagon.Amount >= 2) return false;
-	}
 	int32 Earned = 0;
 	for (const FOreDealHarvestPayout& Payout : Rule.HarvestPayouts)
 		if (Wagon.Amount >= Payout.MinimumCards)

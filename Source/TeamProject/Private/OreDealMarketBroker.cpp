@@ -33,6 +33,19 @@ namespace
 		return Result;
 	}
 
+	bool CanSellSingleCardSlot(const TArray<int32>& Counts, int32 Slot)
+	{
+		if (!Counts.IsValidIndex(Slot) || Counts[Slot] != 1) return false;
+		int32 OccupiedSlots = 0;
+		for (int32 Count : Counts)
+		{
+			if (Count <= 0) continue;
+			if (Count != 1) return false;
+			++OccupiedSlots;
+		}
+		return OccupiedSlots == 2;
+	}
+
 	AActor* FindDeckInWorld(UWorld* World)
 	{
 		if (!World) return nullptr;
@@ -334,14 +347,12 @@ bool AOreDealMarketBroker::SimulatePlace(AActor* Board, TArray<int32>& Types, TA
 
 int32 AOreDealMarketBroker::FindForcedHarvestSlot(const TArray<int32>& Types, const TArray<int32>& Counts) const
 {
-	bool bHasStack = false;
-	for (int32 Count : Counts) if (Count >= 2) { bHasStack = true; break; }
 	int32 Best = INDEX_NONE;
 	int32 BestReward = MAX_int32;
 	int32 BestCount = MAX_int32;
 	for (int32 I = 0; I < Counts.Num(); ++I)
 	{
-		const bool bCanSell = bHasStack ? Counts[I] >= 2 : Counts[I] == 1;
+		const bool bCanSell = Counts[I] >= 2 || CanSellSingleCardSlot(Counts, I);
 		if (!bCanSell || Types[I] < 0 || Types[I] >= ResourceCount) continue;
 		const int32 Reward = ResourceSaleReward(Types[I], Counts[I]);
 		if (Reward < BestReward || (Reward == BestReward && Counts[I] < BestCount))

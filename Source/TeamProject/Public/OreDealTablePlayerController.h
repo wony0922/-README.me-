@@ -71,9 +71,11 @@ private:
 	int32 SupplyDrawRequestedCount = 0;
 	float HandRackRefreshElapsed = 0.0f;
 	float TurnUIRefreshElapsed = 0.0f;
+	mutable TWeakObjectPtr<AActor> CachedPlayerBoard;
 	TWeakObjectPtr<AActor> CachedCardDeck;
 	float MarketRefreshElapsed = 0.0f;
 
+	AActor* GetPlayerBoard() const;
 	void UpdatePointerSelection();
 	bool TraceCenterPointer(FHitResult& OutHit) const;
 	int32 GetCardFocusIndex(const FHitResult& Hit) const;

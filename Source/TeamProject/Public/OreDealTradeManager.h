@@ -141,7 +141,7 @@ private:
 	int32 FindPlayer(FName PlayerId) const;
 	int32 FindRule(FName Resource) const;
 	bool HasValidResourceRules() const;
-	bool HarvestWagonInternal(int32 PlayerIndex, int32 WagonIndex, bool bAllowBelowMinimum);
+	bool HarvestWagonInternal(int32 PlayerIndex, int32 WagonIndex);
 	bool CanLoad(int32 PlayerIndex, const TArray<FTradeResourceAmount>& Items) const;
 	void LoadItems(int32 PlayerIndex, const TArray<FTradeResourceAmount>& Items);
 	bool CanRemoveItems(FName PlayerId, const TArray<FTradeResourceAmount>& Items) const;
