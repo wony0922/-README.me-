@@ -67,16 +67,50 @@ namespace
 		if (!World || !Pawn) return nullptr;
 		UClass* BoardClass = LoadBlueprintClass(TEXT("/Game/MaterialTraders/Blueprints/BP_CardBoard.BP_CardBoard_C"));
 		if (!BoardClass) return nullptr;
+
+		const FVector PawnLoc = Pawn->GetActorLocation();
+		// Ignore pawns that have not spawned into a seat yet (e.g. resting at world origin)
+		if (FVector::DistSquared2D(PawnLoc, FVector::ZeroVector) < FMath::Square(30.0f))
+		{
+			return nullptr;
+		}
+
 		TArray<AActor*> Boards;
 		UGameplayStatics::GetAllActorsOfClass(World, BoardClass, Boards);
-		AActor* Best = nullptr;
-		double BestDistance = TNumericLimits<double>::Max();
+
+		const FVector Forward2D = Pawn->GetActorForwardVector().GetSafeNormal2D();
+		AActor* BestFrontBoard = nullptr;
+		double BestFrontDistSq = TNumericLimits<double>::Max();
+
+		AActor* FallbackBoard = nullptr;
+		double FallbackDistSq = TNumericLimits<double>::Max();
+
 		for (AActor* Board : Boards)
 		{
-			const double Distance = FVector::DistSquared(Pawn->GetActorLocation(), Board->GetActorLocation());
-			if (Distance < BestDistance) { BestDistance = Distance; Best = Board; }
+			if (!IsValid(Board)) continue;
+			FVector ToBoard = Board->GetActorLocation() - PawnLoc;
+			ToBoard.Z = 0.0f;
+			const double DistSq = ToBoard.SizeSquared();
+
+			if (DistSq < FallbackDistSq)
+			{
+				FallbackDistSq = DistSq;
+				FallbackBoard = Board;
+			}
+
+			// The player's own cart board sits directly in front of the seated pawn (~45cm to 120cm away)
+			const double Dot = FVector::DotProduct(Forward2D, ToBoard.GetSafeNormal());
+			if (Dot > 0.45 && DistSq >= FMath::Square(25.0) && DistSq <= FMath::Square(160.0))
+			{
+				if (DistSq < BestFrontDistSq)
+				{
+					BestFrontDistSq = DistSq;
+					BestFrontBoard = Board;
+				}
+			}
 		}
-		return Best;
+
+		return BestFrontBoard ? BestFrontBoard : FallbackBoard;
 	}
 
 	AActor* FindCardDeck(UWorld* World)
@@ -124,6 +158,13 @@ namespace
 		// Hand-built racks are often pasted as plain mesh actors without tags or a custom
 		// name. Limit that fallback to small mesh pieces close to the local seat.
 		return Actor->IsA<AStaticMeshActor>() && Actor->GetComponentsBoundingBox(true).GetExtent().Size() < 500.0f;
+	}
+
+	bool IsGameStarted(AActor* Deck)
+	{
+		if (!IsValid(Deck)) return false;
+		const FBoolProperty* StartedProp = FindFProperty<FBoolProperty>(Deck->GetClass(), TEXT("bGameStarted"));
+		return StartedProp && StartedProp->GetPropertyValue_InContainer(Deck);
 	}
 
 	bool IsPlayersTurn(AActor* Deck, APlayerState* PlayerState, int32& OutPhase)
@@ -187,8 +228,27 @@ void AOreDealTablePlayerController::BeginPlay()
 
 AActor* AOreDealTablePlayerController::GetPlayerBoard() const
 {
-	if (CachedPlayerBoard.IsValid()) return CachedPlayerBoard.Get();
-	AActor* Board = FindBoardForPawn(GetWorld(), GetPawn());
+	APawn* MyPawn = GetPawn();
+	if (CachedPlayerBoard.IsValid())
+	{
+		if (MyPawn)
+		{
+			const FVector PawnLoc = MyPawn->GetActorLocation();
+			if (FVector::DistSquared2D(PawnLoc, FVector::ZeroVector) >= FMath::Square(30.0f))
+			{
+				FVector ToBoard = CachedPlayerBoard->GetActorLocation() - PawnLoc;
+				ToBoard.Z = 0.0f;
+				const double DistSq = ToBoard.SizeSquared();
+				const double Dot = FVector::DotProduct(MyPawn->GetActorForwardVector().GetSafeNormal2D(), ToBoard.GetSafeNormal());
+				if (Dot > 0.45 && DistSq >= FMath::Square(25.0) && DistSq <= FMath::Square(160.0))
+				{
+					return CachedPlayerBoard.Get();
+				}
+			}
+		}
+		CachedPlayerBoard = nullptr;
+	}
+	AActor* Board = FindBoardForPawn(GetWorld(), MyPawn);
 	if (IsValid(Board)) CachedPlayerBoard = Board;
 	return Board;
 }
@@ -313,6 +373,25 @@ void AOreDealTablePlayerController::PlayerTick(float DeltaTime)
 		KeyboardSelectedReveal = GetBlueprintInt(TEXT("SelectedReveal"), KeyboardSelectedReveal);
 		bHasKeyboardFocusSnapshot = true;
 	}
+
+	if (IsLocalController())
+	{
+		AActor* Deck = FindCardDeck(GetWorld());
+		int32 Phase = INDEX_NONE;
+		if (IsGameStarted(Deck) && IsPlayersTurn(Deck, PlayerState, Phase) && Phase == 0)
+		{
+			const int32 ForcedSlot = GetForcedWagonSlotForHandFront();
+			const int32 TargetFocus = (ForcedSlot != INDEX_NONE) ? (2 + ForcedSlot) : ((KeyboardFocusIndex == 3) ? 3 : 2);
+			if (GetBlueprintInt(TEXT("FocusIndex"), 2) != TargetFocus || GetBlueprintInt(TEXT("SelectedReveal"), INDEX_NONE) != INDEX_NONE)
+			{
+				SetBlueprintInt(TEXT("FocusIndex"), TargetFocus);
+				SetBlueprintInt(TEXT("SelectedReveal"), INDEX_NONE);
+				KeyboardFocusIndex = TargetFocus;
+				PointerFocusIndex = TargetFocus;
+				RefreshBlueprintGlow();
+			}
+		}
+	}
 }
 
 void AOreDealTablePlayerController::UpdateRotation(float DeltaTime)
@@ -431,6 +510,42 @@ bool AOreDealTablePlayerController::InputKey(const FInputKeyEventArgs& Params)
 				IsPlayersTurn(Deck, PlayerState, Phase) && Phase == 3) ServerRequestSupplyDraw();
 			return true;
 		}
+		if (Params.Key == EKeys::A || Params.Key == EKeys::Left)
+		{
+			if (!InteractionWidget || (!InteractionWidget->IsSalesOpen() && !InteractionWidget->IsChatExpanded() && !InteractionWidget->IsMarketOpen() && !InteractionWidget->IsHandRackOpen()))
+			{
+				MoveTableFocus(-1);
+				return true;
+			}
+		}
+		if (Params.Key == EKeys::D || Params.Key == EKeys::Right)
+		{
+			if (!InteractionWidget || (!InteractionWidget->IsSalesOpen() && !InteractionWidget->IsChatExpanded() && !InteractionWidget->IsMarketOpen() && !InteractionWidget->IsHandRackOpen()))
+			{
+				MoveTableFocus(1);
+				return true;
+			}
+		}
+		if (Params.Key == EKeys::SpaceBar)
+		{
+			if (!InteractionWidget || (!InteractionWidget->IsSalesOpen() && !InteractionWidget->IsChatExpanded() && !InteractionWidget->IsMarketOpen() && !InteractionWidget->IsHandRackOpen()))
+			{
+				AActor* Deck = FindCardDeck(GetWorld());
+				if (!IsGameStarted(Deck))
+				{
+					// Game not started yet: forward to Blueprint's PressSpace / start flow!
+					if (UFunction* PressSpaceFunc = FindFunction(TEXT("PressSpace")))
+					{
+						ProcessEvent(PressSpaceFunc, nullptr);
+						return true;
+					}
+					return Super::InputKey(Params);
+				}
+
+				HandleTableSpace();
+				return true;
+			}
+		}
 		if (Params.Key == EKeys::M && InteractionWidget && !InteractionWidget->IsChatExpanded())
 		{
 			ToggleSalesMenu();
@@ -518,6 +633,299 @@ void AOreDealTablePlayerController::GetLocalHandCards(TArray<int32>& OutCards) c
 	if (!HandProperty || !HandElement) return;
 	FScriptArrayHelper Hand(HandProperty, HandProperty->ContainerPtrToValuePtr<void>(MyPawn));
 	for (int32 I = 0; I < Hand.Num(); ++I) OutCards.Add(HandElement->GetPropertyValue(Hand.GetRawPtr(I)));
+}
+
+int32 AOreDealTablePlayerController::GetForcedWagonSlotForResource(int32 ResourceType) const
+{
+	if (ResourceType < 0) return INDEX_NONE;
+	AActor* Board = GetPlayerBoard();
+	if (!IsValid(Board)) return INDEX_NONE;
+
+	const FArrayProperty* TypesProp = FindFProperty<FArrayProperty>(Board->GetClass(), TEXT("wagonTypes"));
+	const FArrayProperty* CountsProp = FindFProperty<FArrayProperty>(Board->GetClass(), TEXT("wagonCounts"));
+	const FIntProperty* TypesInner = TypesProp ? CastField<FIntProperty>(TypesProp->Inner) : nullptr;
+	const FIntProperty* CountsInner = CountsProp ? CastField<FIntProperty>(CountsProp->Inner) : nullptr;
+	if (!TypesProp || !CountsProp || !TypesInner || !CountsInner) return INDEX_NONE;
+
+	FScriptArrayHelper Types(TypesProp, TypesProp->ContainerPtrToValuePtr<void>(Board));
+	FScriptArrayHelper Counts(CountsProp, CountsProp->ContainerPtrToValuePtr<void>(Board));
+
+	const int32 NumSlots = FMath::Min(Types.Num(), Counts.Num());
+	for (int32 Index = 0; Index < NumSlots; ++Index)
+	{
+		const int32 Count = CountsInner->GetPropertyValue(Counts.GetRawPtr(Index));
+		const int32 Res = TypesInner->GetPropertyValue(Types.GetRawPtr(Index));
+		if (Count > 0 && Res == ResourceType)
+		{
+			return Index;
+		}
+	}
+	return INDEX_NONE;
+}
+
+int32 AOreDealTablePlayerController::GetForcedWagonSlotForHandFront() const
+{
+	TArray<int32> HandCards;
+	GetLocalHandCards(HandCards);
+	if (HandCards.Num() <= 0) return INDEX_NONE;
+	return GetForcedWagonSlotForResource(HandCards[0]);
+}
+
+void AOreDealTablePlayerController::MoveTableFocus(int32 Delta)
+{
+	if (!IsLocalController()) return;
+	AActor* Deck = FindCardDeck(GetWorld());
+	if (!IsGameStarted(Deck)) return;
+	int32 Phase = INDEX_NONE;
+	if (!IsPlayersTurn(Deck, PlayerState, Phase)) return;
+
+	if (InteractionWidget && (InteractionWidget->IsSalesOpen() || InteractionWidget->IsChatExpanded() || InteractionWidget->IsMarketOpen() || InteractionWidget->IsHandRackOpen()))
+	{
+		return;
+	}
+
+	bMouseSelectionActive = false;
+	const int32 CurrentFocus = GetBlueprintInt(TEXT("FocusIndex"), 2);
+	const int32 SelectedReveal = GetBlueprintInt(TEXT("SelectedReveal"), INDEX_NONE);
+	const int32 ForcedSlot = GetForcedWagonSlotForHandFront();
+
+	int32 NewFocus = CurrentFocus;
+
+	if (Phase == 0)
+	{
+		// Phase 0 (Mandatory Hand Placement): Only local wagon slots 2 and 3 are allowed!
+		if (ForcedSlot != INDEX_NONE)
+		{
+			// If front hand card is already planted in a slot, lock focus strictly to that slot!
+			NewFocus = 2 + ForcedSlot;
+		}
+		else
+		{
+			// Otherwise freely toggle between local wagon slots 2 and 3
+			NewFocus = (CurrentFocus == 2) ? 3 : 2;
+		}
+		SetBlueprintInt(TEXT("SelectedReveal"), INDEX_NONE);
+	}
+	else if (Phase == 2)
+	{
+		// Phase 2 (Market Reveal Placement)
+		if (SelectedReveal != INDEX_NONE)
+		{
+			// A reveal card is picked up; target must be one of the local wagon slots (2 or 3)
+			int32 RevealCardResource = INDEX_NONE;
+			if (IsValid(Deck))
+			{
+				const FArrayProperty* RevProp = FindFProperty<FArrayProperty>(Deck->GetClass(), TEXT("RevealedCards"));
+				const FIntProperty* RevInner = RevProp ? CastField<FIntProperty>(RevProp->Inner) : nullptr;
+				if (RevProp && RevInner)
+				{
+					FScriptArrayHelper RevHelper(RevProp, RevProp->ContainerPtrToValuePtr<void>(Deck));
+					if (RevHelper.IsValidIndex(SelectedReveal))
+					{
+						RevealCardResource = RevInner->GetPropertyValue(RevHelper.GetRawPtr(SelectedReveal));
+					}
+				}
+			}
+
+			const int32 ForcedRevealSlot = (RevealCardResource != INDEX_NONE) ? GetForcedWagonSlotForResource(RevealCardResource) : INDEX_NONE;
+			if (ForcedRevealSlot != INDEX_NONE)
+			{
+				NewFocus = 2 + ForcedRevealSlot;
+			}
+			else
+			{
+				NewFocus = (CurrentFocus == 2) ? 3 : 2;
+			}
+		}
+		else
+		{
+			// Choosing among reveal cards (0, 1) or local wagon slots (2, 3)
+			TArray<int32> ValidIndices = { 0, 1, 2, 3 };
+			if (ForcedSlot != INDEX_NONE)
+			{
+				// If a hand card has an existing slot, exclude the other slot from selection
+				const int32 ExcludedSlot = (ForcedSlot == 0) ? 3 : 2;
+				ValidIndices.Remove(ExcludedSlot);
+			}
+
+			int32 CurrentIdxInList = ValidIndices.IndexOfByKey(CurrentFocus);
+			if (CurrentIdxInList == INDEX_NONE) CurrentIdxInList = 0;
+			int32 NextIdxInList = (CurrentIdxInList + Delta + ValidIndices.Num()) % ValidIndices.Num();
+			NewFocus = ValidIndices[NextIdxInList];
+		}
+	}
+	else
+	{
+		// In other phases, keep focus strictly within local wagon slots
+		NewFocus = (CurrentFocus == 2) ? 3 : 2;
+	}
+
+	KeyboardFocusIndex = NewFocus;
+	SetBlueprintInt(TEXT("FocusIndex"), NewFocus);
+	RefreshBlueprintGlow();
+}
+
+void AOreDealTablePlayerController::HandleTableSpace()
+{
+	if (!IsLocalController()) return;
+	AActor* Deck = FindCardDeck(GetWorld());
+	int32 Phase = INDEX_NONE;
+	if (!IsPlayersTurn(Deck, PlayerState, Phase)) return;
+
+	if (InteractionWidget && (InteractionWidget->IsSalesOpen() || InteractionWidget->IsChatExpanded() || InteractionWidget->IsMarketOpen() || InteractionWidget->IsHandRackOpen()))
+	{
+		return;
+	}
+
+	int32 CurrentFocus = GetBlueprintInt(TEXT("FocusIndex"), 2);
+	int32 SelectedReveal = GetBlueprintInt(TEXT("SelectedReveal"), INDEX_NONE);
+
+	// Case A: Focusing on deck reveal cards (0 or 1)
+	if (CurrentFocus == 0 || CurrentFocus == 1)
+	{
+		if (Phase == 2)
+		{
+			if (SelectedReveal == CurrentFocus)
+			{
+				SelectedReveal = INDEX_NONE;
+			}
+			else
+			{
+				SelectedReveal = CurrentFocus;
+				// After picking up reveal card, jump directly to the target wagon slot
+				int32 RevealCardResource = INDEX_NONE;
+				if (IsValid(Deck))
+				{
+					const FArrayProperty* RevProp = FindFProperty<FArrayProperty>(Deck->GetClass(), TEXT("RevealedCards"));
+					const FIntProperty* RevInner = RevProp ? CastField<FIntProperty>(RevProp->Inner) : nullptr;
+					if (RevProp && RevInner)
+					{
+						FScriptArrayHelper RevHelper(RevProp, RevProp->ContainerPtrToValuePtr<void>(Deck));
+						if (RevHelper.IsValidIndex(SelectedReveal))
+						{
+							RevealCardResource = RevInner->GetPropertyValue(RevHelper.GetRawPtr(SelectedReveal));
+						}
+					}
+				}
+				const int32 ForcedRevealSlot = (RevealCardResource != INDEX_NONE) ? GetForcedWagonSlotForResource(RevealCardResource) : INDEX_NONE;
+				CurrentFocus = (ForcedRevealSlot != INDEX_NONE) ? (2 + ForcedRevealSlot) : 2;
+				KeyboardFocusIndex = CurrentFocus;
+				SetBlueprintInt(TEXT("FocusIndex"), CurrentFocus);
+			}
+			SetBlueprintInt(TEXT("SelectedReveal"), SelectedReveal);
+			RefreshBlueprintGlow();
+		}
+		return;
+	}
+
+	// Case B: Focusing on local wagon slots (2 or 3)
+	if (CurrentFocus == 2 || CurrentFocus == 3)
+	{
+		const bool bFromReveal = (SelectedReveal != INDEX_NONE);
+		const bool bReveal1 = (SelectedReveal == 1);
+		bool bWagon1 = (CurrentFocus == 3);
+
+		if (!bFromReveal)
+		{
+			// Mandatory rule: if front card is already in a slot, force that slot!
+			const int32 ForcedSlot = GetForcedWagonSlotForHandFront();
+			if (ForcedSlot != INDEX_NONE)
+			{
+				bWagon1 = (ForcedSlot == 1);
+				CurrentFocus = 2 + ForcedSlot;
+				KeyboardFocusIndex = CurrentFocus;
+				SetBlueprintInt(TEXT("FocusIndex"), CurrentFocus);
+			}
+		}
+		else
+		{
+			int32 RevealCardResource = INDEX_NONE;
+			if (IsValid(Deck))
+			{
+				const FArrayProperty* RevProp = FindFProperty<FArrayProperty>(Deck->GetClass(), TEXT("RevealedCards"));
+				const FIntProperty* RevInner = RevProp ? CastField<FIntProperty>(RevProp->Inner) : nullptr;
+				if (RevProp && RevInner)
+				{
+					FScriptArrayHelper RevHelper(RevProp, RevProp->ContainerPtrToValuePtr<void>(Deck));
+					if (RevHelper.IsValidIndex(SelectedReveal))
+					{
+						RevealCardResource = RevInner->GetPropertyValue(RevHelper.GetRawPtr(SelectedReveal));
+					}
+				}
+			}
+			const int32 ForcedRevealSlot = (RevealCardResource != INDEX_NONE) ? GetForcedWagonSlotForResource(RevealCardResource) : INDEX_NONE;
+			if (ForcedRevealSlot != INDEX_NONE)
+			{
+				bWagon1 = (ForcedRevealSlot == 1);
+			}
+		}
+
+		ServerPlaceCard(bFromReveal, bReveal1, bWagon1);
+
+		SelectedReveal = INDEX_NONE;
+		SetBlueprintInt(TEXT("SelectedReveal"), INDEX_NONE);
+
+		// Pre-adjust focus for the next card if mandatory
+		const int32 NextForcedSlot = GetForcedWagonSlotForHandFront();
+		if (NextForcedSlot != INDEX_NONE)
+		{
+			CurrentFocus = 2 + NextForcedSlot;
+			KeyboardFocusIndex = CurrentFocus;
+			SetBlueprintInt(TEXT("FocusIndex"), CurrentFocus);
+		}
+		RefreshBlueprintGlow();
+	}
+}
+
+void AOreDealTablePlayerController::ServerPlaceCard_Implementation(bool bFromReveal, bool bReveal1, bool bWagon1)
+{
+	// Authoritative enforcement on the server:
+	if (!bFromReveal)
+	{
+		const int32 ForcedSlot = GetForcedWagonSlotForHandFront();
+		if (ForcedSlot != INDEX_NONE)
+		{
+			bWagon1 = (ForcedSlot == 1);
+		}
+	}
+	else
+	{
+		AActor* Deck = FindCardDeck(GetWorld());
+		if (IsValid(Deck))
+		{
+			const int32 RevealIdx = bReveal1 ? 1 : 0;
+			const FArrayProperty* RevProp = FindFProperty<FArrayProperty>(Deck->GetClass(), TEXT("RevealedCards"));
+			const FIntProperty* RevInner = RevProp ? CastField<FIntProperty>(RevProp->Inner) : nullptr;
+			if (RevProp && RevInner)
+			{
+				FScriptArrayHelper RevHelper(RevProp, RevProp->ContainerPtrToValuePtr<void>(Deck));
+				if (RevHelper.IsValidIndex(RevealIdx))
+				{
+					const int32 Res = RevInner->GetPropertyValue(RevHelper.GetRawPtr(RevealIdx));
+					const int32 ForcedRevealSlot = GetForcedWagonSlotForResource(Res);
+					if (ForcedRevealSlot != INDEX_NONE)
+					{
+						bWagon1 = (ForcedRevealSlot == 1);
+					}
+				}
+			}
+		}
+	}
+
+	// Invoke BP_PC_Table's DoPlace logic on the server
+	if (UFunction* DoPlaceFunc = FindFunction(TEXT("DoPlace")))
+	{
+		struct FDoPlaceParams
+		{
+			bool FromReveal;
+			bool Reveal1;
+			bool Wagon1;
+		} Params;
+		Params.FromReveal = bFromReveal;
+		Params.Reveal1 = bReveal1;
+		Params.Wagon1 = bWagon1;
+		ProcessEvent(DoPlaceFunc, &Params);
+	}
 }
 
 void AOreDealTablePlayerController::ToggleChat()
@@ -811,11 +1219,13 @@ bool AOreDealTablePlayerController::TraceCenterPointer(FHitResult& OutHit) const
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(OreDealCenterPointer), false);
 	QueryParams.AddIgnoredActor(GetPawn());
 	const FVector RayEnd = RayOrigin + RayDirection.GetSafeNormal() * 10000.0f;
-	const auto IsInteractive = [this](AActor* Actor)
+	AActor* LocalBoard = GetPlayerBoard();
+	const auto IsInteractive = [this, LocalBoard](AActor* Actor)
 	{
 		if (!IsValid(Actor)) return false;
+		if (Actor == LocalBoard) return true;
 		if (Actor->ActorHasTag(TEXT("OreDealMerchant")) || Actor->ActorHasTag(TEXT("OreDealCardRack"))) return true;
-		if (IsRackCandidateAtLocalSeat(GetWorld(), GetPlayerBoard(), Actor)) return true;
+		if (IsRackCandidateAtLocalSeat(GetWorld(), LocalBoard, Actor)) return true;
 		return Actor == FindCardDeck(GetWorld());
 	};
 	if (World->LineTraceSingleByChannel(OutHit, RayOrigin, RayEnd, ECC_Visibility, QueryParams) && IsInteractive(OutHit.GetActor())) return true;
@@ -824,6 +1234,7 @@ bool AOreDealTablePlayerController::TraceCenterPointer(FHitResult& OutHit) const
 	// Some table meshes have no Visibility/Camera response. Fall back to their bounds so the
 	// center pointer still activates tagged merchant/rack actors and the draw deck.
 	TArray<AActor*> Candidates;
+	if (IsValid(LocalBoard)) Candidates.Add(LocalBoard);
 	UGameplayStatics::GetAllActorsWithTag(World, TEXT("OreDealMerchant"), Candidates);
 	TArray<AActor*> RackActors;
 	UGameplayStatics::GetAllActorsWithTag(World, TEXT("OreDealCardRack"), RackActors);
@@ -832,7 +1243,7 @@ bool AOreDealTablePlayerController::TraceCenterPointer(FHitResult& OutHit) const
 	UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), NearbyActors);
 	for (AActor* Candidate : NearbyActors)
 	{
-		if (IsRackCandidateAtLocalSeat(World, GetPlayerBoard(), Candidate)) Candidates.AddUnique(Candidate);
+		if (IsRackCandidateAtLocalSeat(World, LocalBoard, Candidate)) Candidates.AddUnique(Candidate);
 	}
 	if (AActor* Deck = FindCardDeck(World)) Candidates.AddUnique(Deck);
 	float NearestDistance = TNumericLimits<float>::Max();
@@ -904,10 +1315,67 @@ void AOreDealTablePlayerController::RefreshBlueprintGlow()
 	{
 		ProcessEvent(Function, nullptr);
 	}
+
+	// Strictly ensure that no other player's cart board ever glows!
+	UWorld* World = GetWorld();
+	if (!World) return;
+	AActor* MyBoard = GetPlayerBoard();
+
+	UClass* BoardClass = LoadBlueprintClass(TEXT("/Game/MaterialTraders/Blueprints/BP_CardBoard.BP_CardBoard_C"));
+	if (!BoardClass) return;
+
+	TArray<AActor*> AllBoards;
+	UGameplayStatics::GetAllActorsOfClass(World, BoardClass, AllBoards);
+	UFunction* SetGlowFunc = nullptr;
+
+	for (AActor* Board : AllBoards)
+	{
+		if (!IsValid(Board) || Board == MyBoard) continue;
+		if (!SetGlowFunc) SetGlowFunc = Board->FindFunction(TEXT("SetGlow"));
+		if (SetGlowFunc)
+		{
+			struct FSetGlowParams { int32 SlotIndex; bool bGlow; } Params0{ 0, false }, Params1{ 1, false };
+			Board->ProcessEvent(SetGlowFunc, &Params0);
+			Board->ProcessEvent(SetGlowFunc, &Params1);
+		}
+	}
 }
 
 void AOreDealTablePlayerController::ApplyPointerFocus(int32 FocusIndex)
 {
+	// Check turn and phase rules for mouse pointer selection
+	AActor* Deck = FindCardDeck(GetWorld());
+	int32 Phase = INDEX_NONE;
+	const bool bMyTurn = IsPlayersTurn(Deck, PlayerState, Phase);
+
+	if (bMyTurn && Phase == 0)
+	{
+		// Mandatory Hand Placement:
+		const int32 ForcedSlot = GetForcedWagonSlotForHandFront();
+		if (ForcedSlot != INDEX_NONE)
+		{
+			// If front card matches an existing slot, force that slot regardless of mouse movement!
+			FocusIndex = 2 + ForcedSlot;
+		}
+		else if (FocusIndex != 2 && FocusIndex != 3)
+		{
+			// In Phase 0, mouse cannot select outside local wagon slots
+			return;
+		}
+	}
+	else if (bMyTurn && Phase == 2)
+	{
+		const int32 SelectedReveal = GetBlueprintInt(TEXT("SelectedReveal"), INDEX_NONE);
+		if (SelectedReveal != INDEX_NONE)
+		{
+			// Reveal card picked up; mouse must point only to local wagon slots 2 or 3
+			if (FocusIndex != 2 && FocusIndex != 3)
+			{
+				return;
+			}
+		}
+	}
+
 	if (PointerFocusIndex == FocusIndex)
 	{
 		return;

@@ -36,6 +36,10 @@ public:
 	void RequestMarketSetOffer(const TArray<int32>& HandIndices);
 	void RequestMarketBeginDeal(APlayerState* Target, const TArray<int32>& MarketIndices);
 	void RequestMarketConsent(bool bAccept);
+	int32 GetForcedWagonSlotForHandFront() const;
+	int32 GetForcedWagonSlotForResource(int32 ResourceType) const;
+	void MoveTableFocus(int32 Delta);
+	void HandleTableSpace();
 	UFUNCTION(Client, Reliable) void ClientShowSaleToast(const FString& Resource, int32 Count);
 	/** Records a hand-card placement on the server when the owning remote client plants. */
 	UFUNCTION(Server, Reliable) void ServerRecordMandatoryHandPlacement(AActor* CardDeck, APlayerState* PlacingPlayer);
@@ -43,6 +47,8 @@ public:
 	UFUNCTION(Server, Reliable) void ServerCompleteTurnStage();
 	/** Starts the existing animated supply draw, only while the local player is in phase four. */
 	UFUNCTION(Server, Reliable) void ServerRequestSupplyDraw();
+	/** Server validated card placement enforcing mandatory same-slot rules. */
+	UFUNCTION(Server, Reliable) void ServerPlaceCard(bool bFromReveal, bool bReveal1, bool bWagon1);
 
 protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ore Deal|Camera", meta=(ClampMin="0", ClampMax="90"))
