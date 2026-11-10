@@ -17,6 +17,8 @@
 #include "InputCoreTypes.h"
 #include "Components/EditableTextBox.h"
 #include "OreDealInteractionWidget.h"
+#include "OreDealHandViewWidget.h"
+#include "OreDealPreGameComponent.h"
 #include "OreDealMarketBroker.h"
 #include "OreDealTurnBridge.h"
 #include "UObject/ConstructorHelpers.h"
@@ -86,46 +88,6 @@ namespace
 		return DeckClass ? UGameplayStatics::GetActorOfClass(World, DeckClass) : nullptr;
 	}
 
-	bool IsRackAtLocalSeat(UWorld* World, AActor* LocalBoard, AActor* ClickedRack)
-	{
-		if (!World || !LocalBoard || !ClickedRack) return false;
-		if (ClickedRack == LocalBoard) return false;
-		UClass* BoardClass = LoadBlueprintClass(TEXT("/Game/MaterialTraders/Blueprints/BP_CardBoard.BP_CardBoard_C"));
-		if (!BoardClass) return false;
-		TArray<AActor*> Boards;
-		UGameplayStatics::GetAllActorsOfClass(World, BoardClass, Boards);
-		AActor* NearestBoard = nullptr;
-		double NearestDistance = TNumericLimits<double>::Max();
-		for (AActor* Board : Boards)
-		{
-			if (!IsValid(Board)) continue;
-			const double Distance = FVector::DistSquared(ClickedRack->GetActorLocation(), Board->GetActorLocation());
-			if (Distance < NearestDistance) { NearestDistance = Distance; NearestBoard = Board; }
-		}
-		// A copied rack can be a plain StaticMeshActor with no gameplay tag. Identify it
-		// by the seat area as well as an optional tag; this also handles rack assemblies
-		// whose separate mesh pieces do not all carry the tag.
-		const bool bExplicitRack = ClickedRack->ActorHasTag(TEXT("OreDealCardRack"));
-		const double SeatRadius = 800.0;
-		return NearestBoard == LocalBoard && (bExplicitRack || FVector::DistSquared(ClickedRack->GetActorLocation(), LocalBoard->GetActorLocation()) <= FMath::Square(SeatRadius));
-	}
-
-	bool IsRackCandidateAtLocalSeat(UWorld* World, AActor* LocalBoard, AActor* Actor)
-	{
-		if (!IsValid(Actor) || !IsRackAtLocalSeat(World, LocalBoard, Actor)) return false;
-		if (Actor->ActorHasTag(TEXT("OreDealCardRack")) || Actor->GetName().Contains(TEXT("Rack"), ESearchCase::IgnoreCase)) return true;
-		TArray<UActorComponent*> Components;
-		Actor->GetComponents(Components);
-		for (const UActorComponent* Component : Components)
-		{
-			if (!Component) continue;
-			if (Component->ComponentHasTag(TEXT("OreDealCardRack")) || Component->GetName().Contains(TEXT("Rack"), ESearchCase::IgnoreCase)) return true;
-		}
-		// Hand-built racks are often pasted as plain mesh actors without tags or a custom
-		// name. Limit that fallback to small mesh pieces close to the local seat.
-		return Actor->IsA<AStaticMeshActor>() && Actor->GetComponentsBoundingBox(true).GetExtent().Size() < 500.0f;
-	}
-
 	bool IsPlayersTurn(AActor* Deck, APlayerState* PlayerState, int32& OutPhase)
 	{
 		if (!IsValid(Deck) || !IsValid(PlayerState)) return false;
@@ -181,6 +143,8 @@ void AOreDealTablePlayerController::BeginPlay()
 		bHasKeyboardFocusSnapshot = true;
 		InteractionWidget = CreateWidget<UOreDealInteractionWidget>(this, UOreDealInteractionWidget::StaticClass());
 		if (InteractionWidget) InteractionWidget->AddToViewport(32000);
+		HandViewWidget = CreateWidget<UOreDealHandViewWidget>(this, UOreDealHandViewWidget::StaticClass());
+		if (HandViewWidget) HandViewWidget->AddToViewport(31000);
 		CachedCardDeck = FindCardDeck(GetWorld());
 	}
 }
@@ -203,6 +167,17 @@ void AOreDealTablePlayerController::PlayerTick(float DeltaTime)
 	{
 		InteractionWidget = CreateWidget<UOreDealInteractionWidget>(this, UOreDealInteractionWidget::StaticClass());
 		if (InteractionWidget) InteractionWidget->AddToViewport(32000);
+	}
+	if (IsLocalController() && !HandViewWidget)
+	{
+		HandViewWidget = CreateWidget<UOreDealHandViewWidget>(this, UOreDealHandViewWidget::StaticClass());
+		if (HandViewWidget) HandViewWidget->AddToViewport(31000);
+	}
+	if (IsLocalController() && !PreGameComponent)
+	{
+		// Waiting-room presentation (hide table pieces / resource HUD, rest left hands) until the game starts.
+		PreGameComponent = NewObject<UOreDealPreGameComponent>(this, TEXT("OreDealPreGame"));
+		if (PreGameComponent) PreGameComponent->RegisterComponent();
 	}
 
 	if (IsLocalController())
@@ -284,6 +259,7 @@ void AOreDealTablePlayerController::PlayerTick(float DeltaTime)
 						InteractionWidget->SetChatExpanded(false);
 						InteractionWidget->SetSalesOpen(false);
 						InteractionWidget->SetHandRackOpen(false);
+						if (HandViewWidget) HandViewWidget->SetOpen(false);
 						InteractionWidget->SetMarketOpen(true);
 						if (!InteractionWidget->IsInViewport()) InteractionWidget->AddToViewport(32000);
 						InteractionWidget->SetVisibility(ESlateVisibility::Visible);
@@ -355,6 +331,13 @@ bool AOreDealTablePlayerController::InputKey(const FInputKeyEventArgs& Params)
 		}
 		if (!Params.Key.IsMouseButton() && !Params.Key.IsGamepadKey()) return true;
 	}
+	if (IsLocalController() && Params.Event == IE_Pressed && HandViewWidget && (!InteractionWidget || !InteractionWidget->IsChatExpanded()))
+	{
+		// Hand viewer: Q opens/closes it, Z/X step through the cards while it is open.
+		if (Params.Key == EKeys::Q) { ToggleHandView(); return true; }
+		if (HandViewWidget->IsOpen() && Params.Key == EKeys::Z) { HandViewWidget->StepFocus(-1); return true; }
+		if (HandViewWidget->IsOpen() && Params.Key == EKeys::X) { HandViewWidget->StepFocus(1); return true; }
+	}
 	if (IsLocalController() && Params.Event == IE_Pressed)
 	{
 		if (Params.Key == EKeys::LeftMouseButton && (!InteractionWidget || !InteractionWidget->IsSalesOpen()) && (!InteractionWidget || !InteractionWidget->IsChatExpanded()) && (!InteractionWidget || !InteractionWidget->IsHandRackOpen()))
@@ -366,11 +349,6 @@ bool AOreDealTablePlayerController::InputKey(const FInputKeyEventArgs& Params)
 			if (HitActor && HitActor->ActorHasTag(TEXT("OreDealMerchant")))
 			{
 				ToggleSalesMenu();
-				return true;
-			}
-			if (HitActor && IsRackCandidateAtLocalSeat(GetWorld(), GetPlayerBoard(), HitActor))
-			{
-				if (IsRackAtLocalSeat(GetWorld(), GetPlayerBoard(), Hit.GetActor())) ToggleHandRack(HitActor);
 				return true;
 			}
 			if (HitActor == FindCardDeck(GetWorld()))
@@ -507,6 +485,13 @@ void AOreDealTablePlayerController::ToggleHandRack(AActor* RackActor)
 			InteractionWidget->SetHandRackScreenPosition(RackScreenPosition, FVector2D(ViewportWidth, ViewportHeight));
 	}
 	ApplyInteractionInputMode(bOpen, false);
+}
+
+void AOreDealTablePlayerController::ToggleHandView()
+{
+	if (!HandViewWidget) return;
+	if (InteractionWidget && (InteractionWidget->IsMarketOpen() || InteractionWidget->IsMarketRevealActive())) return;
+	HandViewWidget->ToggleOpen();
 }
 
 void AOreDealTablePlayerController::GetLocalHandCards(TArray<int32>& OutCards) const
@@ -814,26 +799,16 @@ bool AOreDealTablePlayerController::TraceCenterPointer(FHitResult& OutHit) const
 	const auto IsInteractive = [this](AActor* Actor)
 	{
 		if (!IsValid(Actor)) return false;
-		if (Actor->ActorHasTag(TEXT("OreDealMerchant")) || Actor->ActorHasTag(TEXT("OreDealCardRack"))) return true;
-		if (IsRackCandidateAtLocalSeat(GetWorld(), GetPlayerBoard(), Actor)) return true;
+		if (Actor->ActorHasTag(TEXT("OreDealMerchant"))) return true;
 		return Actor == FindCardDeck(GetWorld());
 	};
 	if (World->LineTraceSingleByChannel(OutHit, RayOrigin, RayEnd, ECC_Visibility, QueryParams) && IsInteractive(OutHit.GetActor())) return true;
 	if (World->LineTraceSingleByChannel(OutHit, RayOrigin, RayEnd, ECC_Camera, QueryParams) && IsInteractive(OutHit.GetActor())) return true;
 
 	// Some table meshes have no Visibility/Camera response. Fall back to their bounds so the
-	// center pointer still activates tagged merchant/rack actors and the draw deck.
+	// center pointer still activates tagged merchant actors and the draw deck.
 	TArray<AActor*> Candidates;
 	UGameplayStatics::GetAllActorsWithTag(World, TEXT("OreDealMerchant"), Candidates);
-	TArray<AActor*> RackActors;
-	UGameplayStatics::GetAllActorsWithTag(World, TEXT("OreDealCardRack"), RackActors);
-	for (AActor* Rack : RackActors) Candidates.AddUnique(Rack);
-	TArray<AActor*> NearbyActors;
-	UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), NearbyActors);
-	for (AActor* Candidate : NearbyActors)
-	{
-		if (IsRackCandidateAtLocalSeat(World, GetPlayerBoard(), Candidate)) Candidates.AddUnique(Candidate);
-	}
 	if (AActor* Deck = FindCardDeck(World)) Candidates.AddUnique(Deck);
 	float NearestDistance = TNumericLimits<float>::Max();
 	AActor* NearestActor = nullptr;

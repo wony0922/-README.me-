@@ -9,6 +9,8 @@ class AActor;
 class APlayerState;
 class UInputMappingContext;
 class UOreDealInteractionWidget;
+class UOreDealHandViewWidget;
+class UOreDealPreGameComponent;
 class AOreDealMarketBroker;
 class APlayerState;
 struct FInputKeyEventArgs;
@@ -30,6 +32,8 @@ public:
 	void HandleChatEnter();
 	void RequestSellWagon(int32 WagonIndex);
 	void ToggleHandRack(AActor* RackActor = nullptr);
+	/** Q: toggles the local bottom-left hand viewer. */
+	void ToggleHandView();
 	void GetLocalHandCards(TArray<int32>& OutCards) const;
 	void GetSaleOptionText(int32 WagonIndex, FString& OutText, bool& bOutCanSell) const;
 	void RequestMarketSelectTarget(APlayerState* Target);
@@ -55,6 +59,10 @@ protected:
 	TObjectPtr<UOreDealInteractionWidget> InteractionWidget;
 	UPROPERTY(Transient)
 	TObjectPtr<AOreDealMarketBroker> MarketBroker;
+	UPROPERTY(Transient)
+	TObjectPtr<UOreDealHandViewWidget> HandViewWidget;
+	UPROPERTY(Transient)
+	TObjectPtr<UOreDealPreGameComponent> PreGameComponent;
 
 private:
 	TWeakObjectPtr<APawn> YawReferencePawn;
