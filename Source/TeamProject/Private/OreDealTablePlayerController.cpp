@@ -17,6 +17,8 @@
 #include "InputCoreTypes.h"
 #include "Components/EditableTextBox.h"
 #include "OreDealInteractionWidget.h"
+#include "OreDealHandViewWidget.h"
+#include "OreDealPreGameComponent.h"
 #include "OreDealMarketBroker.h"
 #include "OreDealTurnBridge.h"
 #include "UObject/ConstructorHelpers.h"
@@ -222,6 +224,8 @@ void AOreDealTablePlayerController::BeginPlay()
 		bHasKeyboardFocusSnapshot = true;
 		InteractionWidget = CreateWidget<UOreDealInteractionWidget>(this, UOreDealInteractionWidget::StaticClass());
 		if (InteractionWidget) InteractionWidget->AddToViewport(32000);
+		HandViewWidget = CreateWidget<UOreDealHandViewWidget>(this, UOreDealHandViewWidget::StaticClass());
+		if (HandViewWidget) HandViewWidget->AddToViewport(31000);
 		CachedCardDeck = FindCardDeck(GetWorld());
 	}
 }
@@ -263,6 +267,17 @@ void AOreDealTablePlayerController::PlayerTick(float DeltaTime)
 	{
 		InteractionWidget = CreateWidget<UOreDealInteractionWidget>(this, UOreDealInteractionWidget::StaticClass());
 		if (InteractionWidget) InteractionWidget->AddToViewport(32000);
+	}
+	if (IsLocalController() && !HandViewWidget)
+	{
+		HandViewWidget = CreateWidget<UOreDealHandViewWidget>(this, UOreDealHandViewWidget::StaticClass());
+		if (HandViewWidget) HandViewWidget->AddToViewport(31000);
+	}
+	if (IsLocalController() && !PreGameComponent)
+	{
+		// Waiting-room presentation (hide table pieces / resource HUD, rest left hands) until the game starts.
+		PreGameComponent = NewObject<UOreDealPreGameComponent>(this, TEXT("OreDealPreGame"));
+		if (PreGameComponent) PreGameComponent->RegisterComponent();
 	}
 
 	if (IsLocalController())
@@ -344,6 +359,7 @@ void AOreDealTablePlayerController::PlayerTick(float DeltaTime)
 						InteractionWidget->SetChatExpanded(false);
 						InteractionWidget->SetSalesOpen(false);
 						InteractionWidget->SetHandRackOpen(false);
+						if (HandViewWidget) HandViewWidget->SetOpen(false);
 						InteractionWidget->SetMarketOpen(true);
 						if (!InteractionWidget->IsInViewport()) InteractionWidget->AddToViewport(32000);
 						InteractionWidget->SetVisibility(ESlateVisibility::Visible);
@@ -434,6 +450,13 @@ bool AOreDealTablePlayerController::InputKey(const FInputKeyEventArgs& Params)
 		}
 		if (!Params.Key.IsMouseButton() && !Params.Key.IsGamepadKey()) return true;
 	}
+	if (IsLocalController() && Params.Event == IE_Pressed && HandViewWidget && (!InteractionWidget || !InteractionWidget->IsChatExpanded()))
+	{
+		// Hand viewer: Q opens/closes it, Z/X step through the cards while it is open.
+		if (Params.Key == EKeys::Q) { ToggleHandView(); return true; }
+		if (HandViewWidget->IsOpen() && Params.Key == EKeys::Z) { HandViewWidget->StepFocus(-1); return true; }
+		if (HandViewWidget->IsOpen() && Params.Key == EKeys::X) { HandViewWidget->StepFocus(1); return true; }
+	}
 	if (IsLocalController() && Params.Event == IE_Pressed)
 	{
 		if (Params.Key == EKeys::LeftMouseButton && (!InteractionWidget || !InteractionWidget->IsSalesOpen()) && (!InteractionWidget || !InteractionWidget->IsChatExpanded()) && (!InteractionWidget || !InteractionWidget->IsHandRackOpen()))
@@ -445,11 +468,6 @@ bool AOreDealTablePlayerController::InputKey(const FInputKeyEventArgs& Params)
 			if (HitActor && HitActor->ActorHasTag(TEXT("OreDealMerchant")))
 			{
 				ToggleSalesMenu();
-				return true;
-			}
-			if (HitActor && IsRackCandidateAtLocalSeat(GetWorld(), GetPlayerBoard(), HitActor))
-			{
-				if (IsRackAtLocalSeat(GetWorld(), GetPlayerBoard(), Hit.GetActor())) ToggleHandRack(HitActor);
 				return true;
 			}
 			if (HitActor == FindCardDeck(GetWorld()))
@@ -622,6 +640,13 @@ void AOreDealTablePlayerController::ToggleHandRack(AActor* RackActor)
 			InteractionWidget->SetHandRackScreenPosition(RackScreenPosition, FVector2D(ViewportWidth, ViewportHeight));
 	}
 	ApplyInteractionInputMode(bOpen, false);
+}
+
+void AOreDealTablePlayerController::ToggleHandView()
+{
+	if (!HandViewWidget) return;
+	if (InteractionWidget && (InteractionWidget->IsMarketOpen() || InteractionWidget->IsMarketRevealActive())) return;
+	HandViewWidget->ToggleOpen();
 }
 
 void AOreDealTablePlayerController::GetLocalHandCards(TArray<int32>& OutCards) const
@@ -1232,10 +1257,12 @@ bool AOreDealTablePlayerController::TraceCenterPointer(FHitResult& OutHit) const
 	if (World->LineTraceSingleByChannel(OutHit, RayOrigin, RayEnd, ECC_Camera, QueryParams) && IsInteractive(OutHit.GetActor())) return true;
 
 	// Some table meshes have no Visibility/Camera response. Fall back to their bounds so the
-	// center pointer still activates tagged merchant/rack actors and the draw deck.
+	// center pointer still activates tagged merchant actors and the draw deck.
 	TArray<AActor*> Candidates;
-	if (IsValid(LocalBoard)) Candidates.Add(LocalBoard);
-	UGameplayStatics::GetAllActorsWithTag(World, TEXT("OreDealMerchant"), Candidates);
+	TArray<AActor*> MerchantActors;
+	UGameplayStatics::GetAllActorsWithTag(World, TEXT("OreDealMerchant"), MerchantActors);
+	Candidates.Append(MerchantActors);
+	if (IsValid(LocalBoard)) Candidates.AddUnique(LocalBoard);
 	TArray<AActor*> RackActors;
 	UGameplayStatics::GetAllActorsWithTag(World, TEXT("OreDealCardRack"), RackActors);
 	for (AActor* Rack : RackActors) Candidates.AddUnique(Rack);
