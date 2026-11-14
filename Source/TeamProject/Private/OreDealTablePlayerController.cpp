@@ -20,6 +20,8 @@
 #include "OreDealHandViewWidget.h"
 #include "OreDealPreGameComponent.h"
 #include "OreDealMarketBroker.h"
+#include "OreDealAuctionBroker.h"
+#include "OreDealAuctionComponent.h"
 #include "OreDealTurnBridge.h"
 #include "UObject/ConstructorHelpers.h"
 #include "UObject/UnrealType.h"
@@ -106,6 +108,7 @@ AOreDealTablePlayerController::AOreDealTablePlayerController()
 	static ConstructorHelpers::FObjectFinder<UInputMappingContext> MouseLookContext(TEXT("/Game/Input/IMC_MouseLook.IMC_MouseLook"));
 	if (DefaultContext.Succeeded()) DefaultMappingContext = DefaultContext.Object;
 	if (MouseLookContext.Succeeded()) MouseLookMappingContext = MouseLookContext.Object;
+	AuctionComponent = CreateDefaultSubobject<UOreDealAuctionComponent>(TEXT("OreDealAuction"));
 }
 
 void AOreDealTablePlayerController::BeginPlay()
@@ -114,12 +117,13 @@ void AOreDealTablePlayerController::BeginPlay()
 	GetPlayerBoard();
 	if (HasAuthority() && GetWorld())
 	{
-		MarketBroker = Cast<AOreDealMarketBroker>(UGameplayStatics::GetActorOfClass(GetWorld(), AOreDealMarketBroker::StaticClass()));
-		if (!MarketBroker)
+		// The trade phase now runs as an auction (AOreDealAuctionBroker). The old market window
+		// broker is no longer spawned, so its GUI never opens.
+		if (!AOreDealAuctionBroker::Find(this))
 		{
 			FActorSpawnParameters SpawnInfo;
 			SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-			MarketBroker = GetWorld()->SpawnActor<AOreDealMarketBroker>(AOreDealMarketBroker::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, SpawnInfo);
+			GetWorld()->SpawnActor<AOreDealAuctionBroker>(AOreDealAuctionBroker::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, SpawnInfo);
 		}
 	}
 	if (IsLocalController())
@@ -138,8 +142,11 @@ void AOreDealTablePlayerController::BeginPlay()
 		FInputModeGameOnly InputMode;
 		InputMode.SetConsumeCaptureMouseDown(false);
 		SetInputMode(InputMode);
-		KeyboardFocusIndex = GetBlueprintInt(TEXT("FocusIndex"), 0);
-		KeyboardSelectedReveal = GetBlueprintInt(TEXT("SelectedReveal"), INDEX_NONE);
+		// In-game A/D focus only ever lands on the wagons (FocusIndex 2/3). 덱 위 카드 are picked by the auction.
+		KeyboardFocusIndex = FMath::Max(GetBlueprintInt(TEXT("FocusIndex"), 2), 2);
+		KeyboardSelectedReveal = INDEX_NONE;
+		SetBlueprintInt(TEXT("FocusIndex"), KeyboardFocusIndex);
+		SetBlueprintInt(TEXT("SelectedReveal"), INDEX_NONE);
 		bHasKeyboardFocusSnapshot = true;
 		InteractionWidget = CreateWidget<UOreDealInteractionWidget>(this, UOreDealInteractionWidget::StaticClass());
 		if (InteractionWidget) InteractionWidget->AddToViewport(32000);
@@ -279,6 +286,12 @@ void AOreDealTablePlayerController::PlayerTick(float DeltaTime)
 		}
 	}
 
+	if (IsLocalController() && HandViewWidget && HandViewWidget->IsOpen() && AuctionComponent && AuctionComponent->IsPickerOpen())
+	{
+		// The auction's hand picker replaces the Q viewer while it is open.
+		HandViewWidget->SetOpen(false);
+	}
+
 	if (IsLocalController() && bMouseSelectionActive)
 	{
 		UpdatePointerSelection();
@@ -287,8 +300,34 @@ void AOreDealTablePlayerController::PlayerTick(float DeltaTime)
 	{
 		KeyboardFocusIndex = GetBlueprintInt(TEXT("FocusIndex"), KeyboardFocusIndex);
 		KeyboardSelectedReveal = GetBlueprintInt(TEXT("SelectedReveal"), KeyboardSelectedReveal);
+		if (KeyboardFocusIndex < 2 || KeyboardSelectedReveal != INDEX_NONE)
+		{
+			// Never focus/highlight the deck-top cards through the old Blueprint focus.
+			KeyboardFocusIndex = FMath::Max(KeyboardFocusIndex, 2);
+			KeyboardSelectedReveal = INDEX_NONE;
+			SetBlueprintInt(TEXT("FocusIndex"), KeyboardFocusIndex);
+			SetBlueprintInt(TEXT("SelectedReveal"), INDEX_NONE);
+			RefreshBlueprintGlow();
+		}
 		bHasKeyboardFocusSnapshot = true;
 	}
+}
+
+int32 AOreDealTablePlayerController::GetWagonFocus() const
+{
+	return FMath::Clamp(GetBlueprintInt(TEXT("FocusIndex"), 2) - 2, 0, 1);
+}
+
+void AOreDealTablePlayerController::SetWagonFocus(int32 WagonIndex)
+{
+	if (WagonIndex < 0 || WagonIndex > 1) return; // BP focus only knows wagons 1 and 2
+	KeyboardFocusIndex = 2 + WagonIndex;
+	KeyboardSelectedReveal = INDEX_NONE;
+	PointerFocusIndex = INDEX_NONE;
+	bMouseSelectionActive = false;
+	SetBlueprintInt(TEXT("FocusIndex"), KeyboardFocusIndex);
+	SetBlueprintInt(TEXT("SelectedReveal"), INDEX_NONE);
+	RefreshBlueprintGlow();
 }
 
 void AOreDealTablePlayerController::UpdateRotation(float DeltaTime)
@@ -305,14 +344,44 @@ void AOreDealTablePlayerController::UpdateRotation(float DeltaTime)
 	if (CurrentPawn && IsLocalController())
 	{
 		FRotator Rotation = GetControlRotation();
+		FRotator AuctionLook;
+		if (AuctionComponent && AuctionComponent->GetCameraOverride(AuctionLook))
+		{
+			// Partner pick: turn smoothly towards the highlighted player, beyond the normal yaw limit.
+			SetControlRotation(FMath::RInterpTo(Rotation, AuctionLook, DeltaTime, 6.0f));
+			bCameraReturning = true;
+			return;
+		}
 		const float RelativeYaw = FMath::FindDeltaAngleDegrees(ReferenceYaw, Rotation.Yaw);
-		Rotation.Yaw = ReferenceYaw + FMath::Clamp(RelativeYaw, -MaxRelativeYawDegrees, MaxRelativeYawDegrees);
+		const float ClampedYaw = ReferenceYaw + FMath::Clamp(RelativeYaw, -MaxRelativeYawDegrees, MaxRelativeYawDegrees);
+		if (bCameraReturning && FMath::Abs(RelativeYaw) > MaxRelativeYawDegrees + 0.5f)
+		{
+			// Ease back inside the limit instead of snapping after the auction camera turn.
+			SetControlRotation(FMath::RInterpTo(Rotation, FRotator(Rotation.Pitch, ClampedYaw, 0.0f), DeltaTime, 6.0f));
+			return;
+		}
+		bCameraReturning = false;
+		Rotation.Yaw = ClampedYaw;
 		SetControlRotation(Rotation);
 	}
 }
 
 bool AOreDealTablePlayerController::InputKey(const FInputKeyEventArgs& Params)
 {
+	if (IsLocalController() && AuctionComponent &&
+		(!InteractionWidget || (!InteractionWidget->IsChatExpanded() && !InteractionWidget->IsSalesOpen())) &&
+		AuctionComponent->HandleInputKey(Params.Key, Params.Event))
+		return true;
+	if (IsLocalController() && (Params.Key == EKeys::A || Params.Key == EKeys::D) &&
+		(!InteractionWidget || (!InteractionWidget->IsChatExpanded() && !InteractionWidget->IsSalesOpen() && !InteractionWidget->IsHandRackOpen())))
+	{
+		// A/D moves the in-game focus between 마차 1 and 마차 2 only (no more stops on the deck-top cards).
+		int32 Phase = INDEX_NONE;
+		if (!IsPlayersTurn(FindCardDeck(GetWorld()), PlayerState, Phase)) return Super::InputKey(Params);
+		if (Params.Event == IE_Pressed || Params.Event == IE_Repeat)
+			SetWagonFocus(FMath::Clamp(GetWagonFocus() + (Params.Key == EKeys::D ? 1 : -1), 0, 1));
+		return true;
+	}
 	if (IsLocalController() && InteractionWidget && InteractionWidget->IsMarketRevealActive() && Params.Event == IE_Pressed)
 		return true;
 	if (IsLocalController() && InteractionWidget && InteractionWidget->IsMarketOpen() && Params.Event == IE_Pressed)
@@ -711,6 +780,10 @@ void AOreDealTablePlayerController::ServerCompleteTurnStage_Implementation()
 	AActor* Deck = FindCardDeck(GetWorld());
 	int32 Phase = INDEX_NONE;
 	if (!IsPlayersTurn(Deck, PlayerState, Phase) || Phase == 1) return;
+	// Phase 3/4 (placing taken cards) ends on its own once every player has placed them.
+	if (Phase == 2)
+		if (const AOreDealAuctionBroker* Auction = AOreDealAuctionBroker::Find(this))
+			if (Auction->GetStage() != EOreDealAuctionStage::Idle) return;
 
 	if (Phase == 3)
 	{
@@ -848,8 +921,7 @@ int32 AOreDealTablePlayerController::GetCardFocusIndex(const FHitResult& Hit) co
 	}
 
 	const FString Name = Component->GetName();
-	if (bPublicDeck && (Name.Contains(TEXT("RevealCard0")) || Name.Contains(TEXT("RevealGlow0")))) return 0;
-	if (bPublicDeck && (Name.Contains(TEXT("RevealCard1")) || Name.Contains(TEXT("RevealGlow1")))) return 1;
+	// 덱 위 카드 are no longer focus targets here; the auction picks them with A/D.
 	if (bOwnBoard && (Name.Contains(TEXT("WagonCard0")) || Name.Contains(TEXT("WagonGlow0")))) return 2;
 	if (bOwnBoard && (Name.Contains(TEXT("WagonCard1")) || Name.Contains(TEXT("WagonGlow1")))) return 3;
 	if (bPublicDeck && (Name.Contains(TEXT("WagonCard")) || Name.Contains(TEXT("WagonGlow")))) return INDEX_NONE;

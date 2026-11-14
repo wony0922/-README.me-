@@ -12,6 +12,7 @@ class UOreDealInteractionWidget;
 class UOreDealHandViewWidget;
 class UOreDealPreGameComponent;
 class AOreDealMarketBroker;
+class UOreDealAuctionComponent;
 class APlayerState;
 struct FInputKeyEventArgs;
 
@@ -47,6 +48,10 @@ public:
 	UFUNCTION(Server, Reliable) void ServerCompleteTurnStage();
 	/** Starts the existing animated supply draw, only while the local player is in phase four. */
 	UFUNCTION(Server, Reliable) void ServerRequestSupplyDraw();
+	UOreDealAuctionComponent* GetAuctionComponent() const { return AuctionComponent; }
+	/** Wagon the A/D focus is on (0 = 마차 1, left; 1 = 마차 2, right). Drives BP_PC_Table.FocusIndex 2/3. */
+	int32 GetWagonFocus() const;
+	void SetWagonFocus(int32 WagonIndex);
 
 protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ore Deal|Camera", meta=(ClampMin="0", ClampMax="90"))
@@ -63,6 +68,9 @@ protected:
 	TObjectPtr<UOreDealHandViewWidget> HandViewWidget;
 	UPROPERTY(Transient)
 	TObjectPtr<UOreDealPreGameComponent> PreGameComponent;
+	/** Auction-style trade phase: RPCs, input, HUD and floating cards. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ore Deal")
+	TObjectPtr<UOreDealAuctionComponent> AuctionComponent;
 
 private:
 	TWeakObjectPtr<APawn> YawReferencePawn;
@@ -74,6 +82,8 @@ private:
 	bool bHasKeyboardFocusSnapshot = false;
 	bool bPointerCentered = false;
 	bool bChatEnterConsumed = false;
+	/** True while the camera eases back inside the yaw limit after an auction camera turn. */
+	bool bCameraReturning = false;
 	bool bSupplyDrawRequested = false;
 	int32 SupplyDrawInitialHandCount = 0;
 	int32 SupplyDrawRequestedCount = 0;

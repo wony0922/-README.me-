@@ -1,7 +1,17 @@
 # AI 작업노트 — Ore Deal (TeamProject)
 
 > 새 대화에서 Claude에게: "Docs/AI_작업노트.md 읽고 이어서 하자" 라고 하면 됩니다.
-> 마지막 갱신: 2026-10-16
+> 마지막 갱신: 2026-11-14 (8장 경매 거래 추가)
+
+## 용어 (2026-11-14 사용자 정의, 구현·수정 설명에 이 이름만 사용)
+| 용어 | 뜻 | 코드상 저장 위치 |
+|---|---|---|
+| **손패** | 플레이어가 들고 있는 카드 | 폰 `BP_SeatedPlayer.HandCards` |
+| **가져온 카드** | 거래 단계에서 가져와 마차에 반드시 배치해야 하는 카드(가져온 순서대로) | `AOreDealAuctionBroker` 좌석의 `PendingCards` |
+| **덱 위 카드** | 덱 위에 펼쳐진 카드 전부(처음 펼친 2장 중 안 가져간 카드 + 턴 플레이어가 손패에서 올린 카드) | `BP_CardDeck.RevealedCards` **배열 하나**(빈 칸 -1은 무시). 턴 플레이어가 낸 손패는 이 배열에 push |
+| **거래 카드** | 덱 위 카드 중 턴 플레이어가 이번에 거래하려고 고른 카드(강조 표시) | `AOreDealAuctionBroker.LotIndices` (`RevealedCards`의 인덱스) |
+| **제안 카드** | 다른 플레이어가 거래 단계에서 손패에서 골라 낸 카드 | 좌석의 `OfferCards` / `OfferHandIndices` |
+| **마차 1 카드 / 마차 2 카드** | 마차에 배치된 카드. 플레이어 기준 왼쪽 = 마차 1, 오른쪽 = 마차 2 | `BP_CardBoard.WagonTypes/WagonCounts` 인덱스 0 / 1 (WagonPivot0 = 왼쪽) |
 
 ## 0. 환경
 - UE 5.8, 블루프린트 전용 프로젝트. 2~4인 LAN 멀티 보드/카드게임 (Listen Server).
@@ -91,7 +101,7 @@
 ## 5. 남은 할 일
 - 마우스로 좌우 둘러볼 때 머리 회전 실기 확인 (클라→서버 RPC).
 - 덱 드로우: ServerDrawCard RPC 설정 확인, 실제 룰(턴/드로우 시점)에 연결 (지금은 W 테스트키)
-- 플레이어 간 카드 거래(룰 확정 후), 나무(Wood) 획득 규칙(현재 항상 0).
+- 플레이어 간 카드 거래 → 8장 경매 거래로 구현됨. 나무(Wood) 획득 규칙(현재 항상 0).
 - F9 디버그 키 제거, 동점 처리, 플레이어 이름 표시.
 - 청산 가격/최소 개수는 임시값 → 팀 룰 확정 시 BP_CardBoard SellPrice/MinSellCount 수정.
 
@@ -104,3 +114,83 @@
 - 현재 구현 공백: BP_CardDeck은 공개 카드 2장/턴 소유자를 관리하고, BP_SeatedPlayer는 테스트용 드로우를 제공하지만, 전용 자원 대기열·거래 단계·보급품 정산·턴 흐름 연결은 아직 없다. BP_CardBoard는 마차 2칸, 자원 누적/정산 일부만 담당한다.
 - 다음 블루프린트 작업 순서: (1) 서버 권한의 턴 단계 enum과 단계 전환, (2) 플레이어별 순서 고정 자원 대기열 및 맨 앞 처리, (3) 거래 제안/수락/기부 RPC와 다중 거래 단계 상태, (4) 거래 자원 즉시 마차 적재 및 유효성 검사, (5) 보급품 차감·정산·세 번째 마차 구매, (6) 덱 소진 종료와 HUD 반영.
 - 주의: 현재 환경에는 Unreal 에디터/Blueprint 그래프 편집 도구가 연결되어 있지 않다. `.uasset` 그래프를 텍스트 패치하는 것은 안전하지 않으므로, 실제 런타임 규칙은 에디터에서 블루프린트를 수정할 수 있을 때 위 순서대로 적용해야 한다. README는 규칙 기준을 갱신했으며 블루프린트 구현 완료를 뜻하지 않는다.
+
+## 7. 2026-11-10~11 작업 기록 (진행 중)
+- **작업 폴더 변경**: 지금 프로젝트 경로는 `C:\Project\-README.me-` (예전 `C:\프로젝트\게임가상현실\...` 아님). 프로젝트에 팀원이 작성한 C++ 모듈(`Source/TeamProject`)이 있으므로 Visual Studio 빌드 필요.
+- **버그는 팀원 담당**: 전체 검토에서 찾은 C++ 버그(자원 5종/8종 불일치, 덱 소진 시 2단계 정지, 1장 판매 조건 등)는 팀원이 고치기로 함. 손대지 않음.
+- **살롱 적용 (완료, 레벨 저장됨)**: Blender `GameVR.blend`의 `MT_Saloon`을 `Export\SM_Saloon_*.fbx`로 내보내 `/Game/Asset/Saloon/SM_Saloon_{Structure,Ground,Exterior,Bar,Interior,Props}` 덮어씀. `Lvl_Table` 폴더 `Saloon`에 6개 배치, 위치 (40,-60,0). 기존 `Floor`는 숨김+충돌 끔.
+- **조명 (완료, 저장됨)**: `Saloon/Lights`에 PointLight 11개(샹들리에 900lm 그림자 O, 테이블 보조 150lm, 촛대 9개 225lm, 3300K). PostProcessVolume 노출 보정 -0.5.
+- **이동 입력 제거 (완료, 저장됨)**: `IMC_Default`에서 `IA_Move`, `IA_Jump` 매핑 삭제(템플릿 캐릭터에서만 쓰던 것). `IA_Look` 게임패드만 남음.
+- **카드 랙 모형 삭제 (완료, 저장됨)**: 레벨의 `OreDeal_CardRack_*` 12개 삭제.
+- **손패 보기 Q/Z/X (완료: 빌드 성공, PIE에서 Q 열기·Z/X 이동 확인)**:
+  - 새 파일 `Public/OreDealHandViewWidget.h`, `Private/OreDealHandViewWidget.cpp` — 좌측 하단 카드 그림 표시, 현재 카드 1.12배, 앞뒤 카드는 0.86배부터 작아지며 좌우로 절반 이상 겹침, 좌우 3장씩만 표시, 0.25초 보간 이동.
+  - `OreDealTablePlayerController` 수정: Q 열기/닫기, Z 이전, X 다음, 장터가 열리면 자동으로 닫힘. 랙 클릭 코드와 랙 탐색(전체 액터 스캔) 제거.
+  - 카드 텍스처 순서: Stone, Coal, Gold, Iron, Diamond (`BP_CardBoard.FloatMats`와 같음).
+- **다음 할 일**: 2인 실제 게임에서 손패 보기 확인(드로우·거래 후 자동 갱신, 장터 열릴 때 자동 닫힘). 팀원에게 컨트롤러 파일 수정 사실 공유.
+- **PIE 테스트 팁**: 메인메뉴 UMG 버튼은 Slate 클릭이 안 먹음 → PIE 월드에서 콘솔 `open /Game/MaterialTraders/Maps/Lvl_Table?listen`로 호스트 진입, `ke * ServerStartDraw` 반복으로 손패 채우기, SlateInspector PressKey로 Q/Z/X.
+- **Unreal Python 원격 실행**: Blender MCP의 Python에서 UDP 239.0.0.1:6766 원격 실행 프로토콜로 언리얼 명령 실행 가능(언리얼 MCP 서버가 꺼져 있을 때 대안).
+
+## 8. 2026-11-14 경매 거래 시스템 (C++, 기존 거래창 대체)
+### 8-0. 같은 날 레벨 작업
+- 마차판 이미지: `Asset/Board_image/상점` 이미지 → `/Game/MaterialTraders/Materials/MI_Board_Image`, BP_CardBoard 판 비율을 이미지 비율에 맞춤. 레벨 CardBoard_0~3 재배치(SeatIndex 0~3, 폴더 Table/Boards), 사용자가 옮긴 판 거리에 맞춰 전부 **±54.816**.
+- 언리얼 MCP 자동 시작: 에디터 설정 `ModelContextProtocolSettings.bAutoStartServer = true`.
+
+### 8-1. 규칙 (사용자 확정)
+1. 2/4 거래 단계에 들어가면 덱에서 2장을 펼치고, 턴 플레이어가 C로 1장 또는 2장 모두 골라 Space로 가져간다 → **가져온 카드**(덱 순서대로). 나머지는 **덱 위 카드**로 남는다.
+   - 2장을 다 가져가도 2번(손패 올리기)은 반드시 거친다. 덱 위 카드가 비었는지는 2번이 끝난 뒤 확인하고, 비어 있으면 바로 가져온 카드 배치 단계로 간다.
+2. 턴 플레이어가 손패에서 원하는 카드를 골라 덱 위에 올린다(0장 가능).
+3. 턴 플레이어가 덱 위 카드 중 **거래 카드**를 여러 장 고른다(강조 표시).
+4. 다른 플레이어는 손패에서 **제안 카드**를 골라 낸다(캐릭터 머리 위에 표시). 아무것도 고르지 않고 Space = 거래 안 함.
+5. 3인 이상: 턴 플레이어가 A/D로 상대를 고르고(카메라가 그 사람 쪽으로 부드럽게 회전) Space. 2인: 지목 단계 없이 제안 카드 유무로 바로 진행.
+6. 거래 성립 시 상대는 거래 카드 전부, 턴 플레이어는 상대 제안 카드 전부를 받는다 → 둘 다 **가져온 카드**로. 아무도 제안 안 하면 거래 카드는 턴 플레이어의 가져온 카드로 들어간다.
+7. 덱 위 카드가 없어질 때까지 3~6 반복.
+8. 모두 가져온 카드를 마차에 배치해야 한다(A/D 마차 선택, Space 배치 — 손패 배치와 같은 키, 이 동안 손패 배치는 막힘). 전원 완료 전 E → "(이름)의 자원 배치가 끝나지 않았습니다". 완료되면 3장 드로우 단계로 자동 진행.
+
+### 8-2. 조작 통일 규칙
+- 인게임 포커스(마차 1/2, 덱 위 카드, 지목할 상대) = **A/D**. 덱 위 카드는 **각 플레이어 화면 기준 좌→우**(아래 줄부터)로 이동, 시작 커서 = 화면 왼쪽 아래 카드.
+- 여러 장 선택 = **C**로 토글 → **Space**로 결정.
+- 내 화면에만 뜨는 카드(손패 선택 창) = **Z/X**.
+- 1단계(필수 배치) 포커스는 마차만(FocusIndex 2/3). 덱 위 카드 선택은 거래 단계에서 2장 펼친 뒤에만.
+
+### 8-3. 덱 위 카드 배치 형태 (덱 로컬 좌표, `DeckSlotLocal`)
+- 1장: 덱 중앙 (0,0,20)
+- 2장: Y ±9 (기존 모양)
+- 3장 이상: 한 줄 최대 3장, 간격 15(2장보다 조금 좁게), 넘치면 줄이 위로(+14z) 늘어남. 장 수 제한 없음.
+- BP 덱의 RevealCard0/1·RevealGlow0/1은 숨기고, `AOreDealAuctionDisplay`(로컬 전용)가 같은 카드 모양(MI_CardFloat_*, M_CardGlow, 회전/스케일 동일)으로 그림. 커서 카드는 3cm 위로·1.12배.
+
+### 8-4. 파일 (`Source/TeamProject`)
+- 새 파일
+  - `OreDealAuctionBroker.h/.cpp` — 서버 권한 경매 상태(레벨에 자동 스폰, Replicated, AlwaysRelevant). Stage: Idle → PickReveal → ActiveOffer → SelectLot → Bidding → (ChoosePartner) → Consume. 좌석 `FOreDealAuctionSeat`(Player, OfferHandIndices, OfferCards, bConfirmed, PendingCards). Tick에서 덱 `TurnPS`/`TurnPhaseIndex`를 보고 시작·리셋, Consume에서 전원 배치 끝나면 단계 2→3 진행. 배치는 `BP_CardBoard.AddCard(CardType, Wagon, PS)`를 리플렉션(ProcessEvent)으로 호출 → 손패 배치와 같은 규칙(다른 종류면 기존 청산).
+  - `OreDealAuctionComponent.h/.cpp` — PC에 붙는 컴포넌트. 서버 RPC(PickReveal/SubmitOffer/SelectLot/FocusPartner/ChoosePartner/PlacePending), 키 처리(`HandleInputKey`), 지목 카메라, HUD·표시 갱신.
+  - `OreDealAuctionHudWidget.h/.cpp` — 상단 안내 문구, 경고 문구, 하단 손패 선택 창(선택 카드 위로 + "✔ 선택"), 우하단 가져온 카드 + 마차 선택 표시.
+  - `OreDealAuctionDisplay.h/.cpp` — 덱 위 카드, 제안 카드(머리 위, 한 줄 5장), 가져온 카드(마차판 옆)를 카메라를 보는 평면으로 그림(풀링).
+- 수정: `OreDealTablePlayerController`(경매 컴포넌트 생성, `InputKey`에서 경매 키 우선 처리, A/D는 마차만, 지목 카메라 보간, 브로커 스폰, 경매 중 단계 2 진행 차단, 손패 선택 창 열리면 Q 손패 보기 닫음), `OreDealTurnBridge`(단계 문구: "2/4 경매 거래", "3/4 가져온 자원 배치 (전원 완료 시 자동 진행)").
+- 이전 MarketBroker(거래창)는 더 이상 스폰하지 않음.
+
+### 8-5. 구현 메모
+- 리슨 서버 호스트는 서버 RPC가 **즉시 실행**됨 → 응답 대기 플래그(`BeginAwait`, Revision 기록)는 RPC **호출 전**에 세팅해야 함. 거절된 요청 대비 1.5초 타임아웃(`AwaitStartTime`).
+- 손패에서 카드를 뺄 때 순서 유지, HandCount 갱신 후 OnRep_HandCards/OnRep_HandCount 호출.
+- 빌드: cpp만 바뀌면 콘솔 `LiveCoding.Compile`(약 40초). 헤더에 멤버 추가 등은 전체 빌드 필요 → `Binaries/Win64/UnrealEditor.modules`의 BuildId를 아무 값으로 바꾸고 에디터 재시작 → "Missing TeamProject Modules" 창에서 **Yes**.
+- PIE 2인 입력 팁: 멀티 창에서는 마우스 캡처한 창이 키를 가져감(Shift+F1로 풀기). 클라 창은 SlateInspector `Click`(조준점 "•") 후 `PressKey`가 확실함. 상태 확인 `getall OreDealAuctionBroker Stage`, `getall OreDealAuctionBroker Seats`.
+
+### 8-6. 남은 것
+- 전체 빌드 후 호스트 가져온 카드 연속 배치 재확인.
+- 덱 Y축 방향 자리에서는 3장 이상일 때 카드가 옆으로 비스듬히 보일 수 있음 → 필요하면 보는 사람 쪽으로 줄을 세우는 방식 검토.
+- 팀원용 작업노트에 용어 표 추가할지 결정.
+
+## 9. 2026-11-14 저사양 최적화 / 새 손(Hand2)
+- 이유: 저사양 노트북에서 2인 이상 테스트 시 렉·강제 종료(건물 없는 버전은 정상).
+- 렌더링(프로젝트 설정): Lumen GI → 없음, 반사 Lumen → 화면 공간, 가상 섀도 맵 → 일반 섀도 맵, 레이트레이싱 끔, 메시 거리 필드 생성 끔. (월드 파티션 레벨이라 Lightmass 베이크 불가 → 조명 11개는 실시간 유지)
+- 모델 LOD: 캐릭터 `SM_Char_Body_R`/`SM_Char_Head_R`(P1·P2)에 25%/10% LOD(화면 크기 0.6/0.25), 살롱 Props/Bar/Structure/Interior/Exterior에 50%/25% LOD(0.3/0.12). `chair1`, `bar_table` Nanite 끔(저폴리라 불필요).
+- 새 손: GameVR.blend의 `Hand_L_v2`/`Hand_R_v2`(리그 `Rig_*_v2`)를 데시메이트 0.35(약 7.6k → 3k 면) 후 `Export\SK_Hand2_L/R.fbx`로 내보냄(리그 원점, 기본 FBX 설정, 리프 본 없음, NLA 스트립 = 애니 이름).
+  - UE: `/Game/Asset/Hand2/SK_Hand2_L/R` + 전용 스켈레톤 + 애니 `SK_Hand2_*_Anim_Open/Grip/Relax/Fist/ThumbsUp`(+R `Point`). 머티리얼 `Hands/M_Hand`.
+  - `BP_SeatedPlayer`: LeftHand/RightHand 메시와 기본 애니, StartDrawAnim·ApplyEmote의 애니 핀을 전부 Hand2로 교체. 기존 `/Game/Asset/Hands`는 남겨둠(미사용).
+  - R_Point 액션은 blend에 없어서 `Export\SK_Hand_RPoint.fbx`에서 가져옴(blend는 저장 안 함).
+
+## 10. 2026-11-14 새 캐릭터(Char2) 3종
+- Blender `GameVR.blend` 컬렉션 `MT_Character2`: `C2_Base_*`(주황 머리·파란 몸통), `C2_Cowboy_*`(모자·반다나·조끼), `C2_Ranger_*`(모자·재킷·셔츠). 머리는 매끈한 구 + 얼굴 텍스처(`T_Char2_Face_Orange/Peach`, 눈·입은 텍스처로만), 머리 원점 = 목(z 0.39), 정면 = -Y. 모자는 머리 자식, 옷은 몸통 자식. 리깅 없음(머리는 BP가 메시째 회전).
+- 내보내기: 머리+모자, 몸통+옷을 각각 합쳐 `Export\SM_Char2_Head_*/Body_*.fbx`.
+- UE: `/Game/Asset/Char2/SM_Char2_{Head,Body}_{Base,Cowboy,Ranger}` + 머티리얼 `M2_*`. `BP_SeatedPlayer`의 `CharacterMeshes`/`HeadMeshes` = [Cowboy, Ranger, Base], 컴포넌트 기본 메시 = Cowboy. 기존 `Player1/2`의 `SM_Char_*_R`은 남겨둠(미사용).
+- 크기(UE cm): 새 머리 폭 39·목 위 높이 37.8(기존 41·38.2), 새 몸통 폭 31.7·높이 43.6(기존 37.8·48). 머리 위치(z 39)와 컴포넌트 스케일은 그대로.
+- 손 수정(같은 날): 가리키기에서 손가락이 안 접히던 원인 = `R_Point` 액션이 쿼터니언 키인데 손 리그 본은 XYZ 오일러 → `R_Fist` 복사 후 Finger3(검지)만 0으로 다시 만듦. 엄지척 손날 튀어나옴 = 손가락 본 웨이트가 손바닥 옆면까지 퍼져 있던 것 → `Hand_*_v2` 웨이트를 관절 위쪽으로 제한 + 스무딩(원본은 메시 `Hand_*_v2_weights_backup`). 다시 내보낸 `SK_Hand2b_L/R` + 애니 `SK_Hand2b_*_Anim_*`를 `BP_SeatedPlayer`에 연결. 이전 `SK_Hand2_*`는 미사용으로 남음.
+- **주의 재확인**: PIE 실행 중 BP 수정·컴파일로 에디터 크래시 발생 → 툴 작업 전 항상 `IsPIERunning` 확인.
