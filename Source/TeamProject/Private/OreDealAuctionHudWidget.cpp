@@ -223,7 +223,7 @@ void UOreDealAuctionHudWidget::ApplyState(const FOreDealAuctionHudState& State)
 			}
 			const FString Controls = State.bPendingInputEnabled
 				? TEXT("A / D : 마차 선택   ·   Space : 배치")
-				: TEXT("카드 선택을 마치면 배치할 수 있습니다");
+				: TEXT("거래가 모두 끝나면 배치할 수 있습니다");
 			PendingText->SetText(FText::FromString(FString::Printf(TEXT("가져온 카드  %d장 남음\n%s\n%s"), State.PendingCards.Num(), *WagonLine, *Controls)));
 		}
 	}

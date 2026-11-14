@@ -40,6 +40,31 @@ namespace
 		return FVector(0.0f, (Column - (InRow - 1) * 0.5f) * DeckRowStep, DeckCardHeight + Row * DeckRowHeight);
 	}
 
+	/**
+	 * BP_CardDeck's own two reveal cards (and their glows). Looked up by name once per deck instead of
+	 * scanning and string-comparing every component each frame.
+	 */
+	const TArray<TWeakObjectPtr<UPrimitiveComponent>>& GetBlueprintRevealParts(AActor* Deck)
+	{
+		struct FEntry
+		{
+			TWeakObjectPtr<AActor> Deck;
+			TArray<TWeakObjectPtr<UPrimitiveComponent>> Parts;
+		};
+		static TArray<FEntry> Entries; // one per PIE world at most
+		for (const FEntry& Entry : Entries)
+			if (Entry.Deck.Get() == Deck) return Entry.Parts;
+		Entries.RemoveAll([](const FEntry& Entry) { return !Entry.Deck.IsValid(); });
+		FEntry& Entry = Entries.AddDefaulted_GetRef();
+		Entry.Deck = Deck;
+		TArray<UPrimitiveComponent*> DeckParts;
+		Deck->GetComponents<UPrimitiveComponent>(DeckParts);
+		for (UPrimitiveComponent* Part : DeckParts)
+			for (const TCHAR* PartName : BlueprintRevealParts)
+				if (Part && Part->GetName() == PartName) Entry.Parts.Add(Part);
+		return Entry.Parts;
+	}
+
 	/** Top of the character's head (falls back to a fixed height above the pawn). */
 	float HeadTopZ(const APawn* Pawn)
 	{
@@ -376,6 +401,13 @@ bool UOreDealAuctionComponent::HandleInputKey(const FKey& Key, EInputEvent Event
 		if (Pending.IsEmpty()) return false;
 		if (Key != EKeys::A && Key != EKeys::D && Key != EKeys::SpaceBar) return false;
 		if (!bPressed) return true;
+		// Placing waits until the trade is over (all 덱 위 카드 gone). Keys are still swallowed so
+		// nothing else (hand placement) happens meanwhile.
+		if (Broker->GetStage() != EOreDealAuctionStage::Consume)
+		{
+			if (Key == EKeys::SpaceBar) Flash(TEXT("덱 위 카드가 모두 거래된 뒤에 가져온 카드를 배치할 수 있습니다"));
+			return true;
+		}
 		const int32 Wagons = GetMyWagonCount();
 		AOreDealTablePlayerController* TablePC = Cast<AOreDealTablePlayerController>(GetOwnerController());
 		if (TablePC && WagonFocus < 2) WagonFocus = TablePC->GetWagonFocus();
@@ -531,8 +563,11 @@ void UOreDealAuctionComponent::RefreshHud()
 	}
 	case EOreDealAuctionStage::Consume:
 	{
+		TArray<int32> MyPending;
+		GetMyPending(MyPending);
 		const FString Names = Broker->GetUnfinishedPlayerNames();
-		State.Status = Names.IsEmpty() ? FString() : FString::Printf(TEXT("%s의 자원 배치가 끝나지 않았습니다"), *Names);
+		if (!MyPending.IsEmpty()) State.Status = TEXT("▶ 가져온 카드를 마차에 배치하세요   ·   A / D 마차 선택   ·   Space 배치");
+		else State.Status = Names.IsEmpty() ? FString() : FString::Printf(TEXT("%s의 자원 배치가 끝나지 않았습니다"), *Names);
 		break;
 	}
 	default: break;
@@ -548,7 +583,7 @@ void UOreDealAuctionComponent::RefreshHud()
 	GetMyPending(State.PendingCards);
 	State.WagonCount = GetMyWagonCount();
 	State.WagonFocus = WagonFocus;
-	State.bPendingInputEnabled = LocalMode == EOreDealAuctionLocalMode::Waiting;
+	State.bPendingInputEnabled = LocalMode == EOreDealAuctionLocalMode::Waiting && Broker->GetStage() == EOreDealAuctionStage::Consume;
 	Hud->ApplyState(State);
 }
 
@@ -588,11 +623,9 @@ void UOreDealAuctionComponent::RefreshDisplay()
 	// RevealCard pair, whose two fixed components are hidden so nothing is drawn twice.
 	if (Deck)
 	{
-		TArray<UPrimitiveComponent*> DeckParts;
-		Deck->GetComponents<UPrimitiveComponent>(DeckParts);
-		for (UPrimitiveComponent* Part : DeckParts)
-			for (const TCHAR* PartName : BlueprintRevealParts)
-				if (Part && Part->GetName() == PartName && !Part->bHiddenInGame) Part->SetHiddenInGame(true);
+		for (const TWeakObjectPtr<UPrimitiveComponent>& WeakPart : GetBlueprintRevealParts(Deck))
+			if (UPrimitiveComponent* Part = WeakPart.Get())
+				if (!Part->bHiddenInGame) Part->SetHiddenInGame(true);
 
 		TArray<int32> DeckCards;
 		AOreDealAuctionBroker::GetDeckCards(GetWorld(), DeckCards);

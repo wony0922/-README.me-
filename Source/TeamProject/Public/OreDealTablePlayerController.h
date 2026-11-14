@@ -13,6 +13,8 @@ class UOreDealHandViewWidget;
 class UOreDealPreGameComponent;
 class AOreDealMarketBroker;
 class UOreDealAuctionComponent;
+class UOreDealStoreComponent;
+struct FOreDealStoreWagonView;
 class APlayerState;
 struct FInputKeyEventArgs;
 
@@ -29,7 +31,13 @@ public:
 	virtual void UpdateRotation(float DeltaTime) override;
 	virtual bool InputKey(const FInputKeyEventArgs& Params) override;
 
+	/** Opens/closes the store window (F). Kept under the old name for the HUD merchant button. */
 	void ToggleSalesMenu();
+	/** Called by the store component: switches cursor/input mode and closes the other local panels. */
+	void OnStoreOpenChanged(bool bOpen);
+	/** What the store's sell tab shows for each of my wagons (same rules as the server-side sale). */
+	void GetStoreWagons(TArray<FOreDealStoreWagonView>& OutWagons) const;
+	UOreDealStoreComponent* GetStoreComponent() const { return StoreComponent; }
 	void HandleChatEnter();
 	void RequestSellWagon(int32 WagonIndex);
 	void ToggleHandRack(AActor* RackActor = nullptr);
@@ -71,6 +79,9 @@ protected:
 	/** Auction-style trade phase: RPCs, input, HUD and floating cards. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ore Deal")
 	TObjectPtr<UOreDealAuctionComponent> AuctionComponent;
+	/** Store window (F): sell wagons, buy items. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ore Deal")
+	TObjectPtr<UOreDealStoreComponent> StoreComponent;
 
 private:
 	TWeakObjectPtr<APawn> YawReferencePawn;

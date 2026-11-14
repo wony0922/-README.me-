@@ -217,7 +217,7 @@ void UOreDealInteractionWidget::BuildInterface()
 	ToastPanel->SetVisibility(ESlateVisibility::Collapsed);
 	SetCanvasRect(RootCanvas, ToastPanel, FVector2D(-22.0f, 22.0f), FVector2D(470.0f, 72.0f), FVector2D(1.0f, 0.0f), FVector2D(1.0f, 0.0f));
 
-	UButton* MerchantButton = MakeButton(WidgetTree, TEXT("🤠 상인 · 자원 판매 (M)"), 20);
+	UButton* MerchantButton = MakeButton(WidgetTree, TEXT("🤠 상점 (F)"), 20);
 	MerchantButton->OnClicked.AddDynamic(this, &UOreDealInteractionWidget::OnMerchantClicked);
 	// Keep the merchant control away from the lobby's centered start prompt and the
 	// gameplay phase HUD. This button is the reliable screen-space entry point even
@@ -225,38 +225,8 @@ void UOreDealInteractionWidget::BuildInterface()
 	MerchantButton->SetVisibility(ESlateVisibility::Visible);
 	SetCanvasRect(RootCanvas, MerchantButton, FVector2D(24.0f, 112.0f), FVector2D(300.0f, 64.0f));
 
-	SalesPanel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("SalesPanel"));
-	SalesPanel->SetBrushColor(FLinearColor(0.035f, 0.025f, 0.02f, 0.96f));
-	UVerticalBox* SalesBody = WidgetTree->ConstructWidget<UVerticalBox>();
-	UHorizontalBox* SalesHeader = WidgetTree->ConstructWidget<UHorizontalBox>();
-	SalesHeader->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("마차 자원 판매"), 24));
-	UButton* CloseButton = MakeButton(WidgetTree, TEXT("닫기"));
-	CloseButton->OnClicked.AddDynamic(this, &UOreDealInteractionWidget::OnCloseSalesClicked);
-	SalesHeader->AddChildToHorizontalBox(CloseButton);
-	SalesBody->AddChildToVerticalBox(SalesHeader);
-	SalesBody->AddChildToVerticalBox(MakeLabel(WidgetTree, TEXT("내 턴의 1~3단계에서 판매할 수 있습니다."), 16));
-	SalesRows = WidgetTree->ConstructWidget<UVerticalBox>();
-	for (int32 I = 0; I < 3; ++I)
-	{
-		UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
-		UTextBlock* Info = MakeLabel(WidgetTree, TEXT("마차"), 18);
-		UButton* SellButton = MakeButton(WidgetTree, TEXT("판매"));
-		if (I == 0) SellButton->OnClicked.AddDynamic(this, &UOreDealInteractionWidget::OnSell0Clicked);
-		else if (I == 1) SellButton->OnClicked.AddDynamic(this, &UOreDealInteractionWidget::OnSell1Clicked);
-		else SellButton->OnClicked.AddDynamic(this, &UOreDealInteractionWidget::OnSell2Clicked);
-		Row->AddChildToHorizontalBox(Info);
-		Row->AddChildToHorizontalBox(SellButton);
-		SalesRows->AddChildToVerticalBox(Row);
-		SalesLabels.Add(Info);
-		SalesButtons.Add(SellButton);
-	}
-	SalesBody->AddChildToVerticalBox(SalesRows);
-	SalesPanel->SetContent(SalesBody);
-	SalesPanel->SetVisibility(ESlateVisibility::Collapsed);
-	// Center the modal on the viewport. Offsetting by the negative half-size while
-	// also using centered alignment pushed almost the entire panel off-screen.
-	SetCanvasRect(RootCanvas, SalesPanel, FVector2D::ZeroVector, FVector2D(820.0f, 600.0f), FVector2D(0.5f, 0.5f), FVector2D(0.5f, 0.5f));
-	SalesSlot = Cast<UCanvasPanelSlot>(SalesPanel->Slot);
+	// The old wagon sales panel is gone: selling now lives in the store window (F, UOreDealStoreWidget),
+	// so its widgets are no longer built. SalesPanel stays null and IsSalesOpen() is always false.
 
 	HandRackPanel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("HandRackPanel"));
 	HandRackPanel->SetBrushColor(FLinearColor(0.025f, 0.025f, 0.028f, 0.96f));

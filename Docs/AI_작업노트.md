@@ -1,7 +1,7 @@
 # AI 작업노트 — Ore Deal (TeamProject)
 
 > 새 대화에서 Claude에게: "Docs/AI_작업노트.md 읽고 이어서 하자" 라고 하면 됩니다.
-> 마지막 갱신: 2026-11-14 (8장 경매 거래 추가)
+> 마지막 갱신: 2026-11-15 (11장 상점 추가)
 
 ## 용어 (2026-11-14 사용자 정의, 구현·수정 설명에 이 이름만 사용)
 | 용어 | 뜻 | 코드상 저장 위치 |
@@ -173,6 +173,8 @@
 - 빌드: cpp만 바뀌면 콘솔 `LiveCoding.Compile`(약 40초). 헤더에 멤버 추가 등은 전체 빌드 필요 → `Binaries/Win64/UnrealEditor.modules`의 BuildId를 아무 값으로 바꾸고 에디터 재시작 → "Missing TeamProject Modules" 창에서 **Yes**.
 - PIE 2인 입력 팁: 멀티 창에서는 마우스 캡처한 창이 키를 가져감(Shift+F1로 풀기). 클라 창은 SlateInspector `Click`(조준점 "•") 후 `PressKey`가 확실함. 상태 확인 `getall OreDealAuctionBroker Stage`, `getall OreDealAuctionBroker Seats`.
 
+- (11/14 저녁 수정) 가져온 카드 배치는 **Consume 단계에서만** 가능. 이전엔 Idle만 아니면 배치돼서, 다른 플레이어가 제안 카드를 고르는 중에도 턴 플레이어가 배치할 수 있었음. 서버 `PlacePending`(Stage==Consume 검사) + 컴포넌트 입력(Consume 전엔 A/D/Space를 삼키고 "덱 위 카드가 모두 거래된 뒤에…" 경고, 손패 배치도 계속 막힘) + HUD(Consume 전 "거래가 모두 끝나면 배치할 수 있습니다", Consume 중 내 가져온 카드가 있으면 "▶ 가져온 카드를 마차에 배치하세요"). 흐름: 덱 위 카드 소진 → 3/4 배치(전원) → 4/4 3장 드로우.
+
 ### 8-6. 남은 것
 - 전체 빌드 후 호스트 가져온 카드 연속 배치 재확인.
 - 덱 Y축 방향 자리에서는 3장 이상일 때 카드가 옆으로 비스듬히 보일 수 있음 → 필요하면 보는 사람 쪽으로 줄을 세우는 방식 검토.
@@ -194,3 +196,63 @@
 - 크기(UE cm): 새 머리 폭 39·목 위 높이 37.8(기존 41·38.2), 새 몸통 폭 31.7·높이 43.6(기존 37.8·48). 머리 위치(z 39)와 컴포넌트 스케일은 그대로.
 - 손 수정(같은 날): 가리키기에서 손가락이 안 접히던 원인 = `R_Point` 액션이 쿼터니언 키인데 손 리그 본은 XYZ 오일러 → `R_Fist` 복사 후 Finger3(검지)만 0으로 다시 만듦. 엄지척 손날 튀어나옴 = 손가락 본 웨이트가 손바닥 옆면까지 퍼져 있던 것 → `Hand_*_v2` 웨이트를 관절 위쪽으로 제한 + 스무딩(원본은 메시 `Hand_*_v2_weights_backup`). 다시 내보낸 `SK_Hand2b_L/R` + 애니 `SK_Hand2b_*_Anim_*`를 `BP_SeatedPlayer`에 연결. 이전 `SK_Hand2_*`는 미사용으로 남음.
 - **주의 재확인**: PIE 실행 중 BP 수정·컴파일로 에디터 크래시 발생 → 툴 작업 전 항상 `IsPIERunning` 확인.
+
+## 11. 2026-11-15 상점 (F 키, C++)
+### 11-1. 동작
+- **F** = 상점 열기/닫기(예전 M 키·판매 창 대체). 게임 시작 후에만 열림. 열려 있는 동안은 상점이 키보드를 전부 가져감(모달), 채팅 입력 중엔 F 무시.
+- 닫히면(F, Esc, 게임 종료 등 이유 무관) 진행 중이던 구매 확인을 취소(`CancelPending`).
+- 레이아웃은 사용자가 준 STORE 시안 그대로: 위 간판, 왼쪽 탭 3개(위부터 **판매 / 구매 / 빈 칸(미정)**), 오른쪽 4x2 칸, 아래 골드판(보유 골드, 변하면 숫자가 커졌다 돌아오며 초록=획득/빨강=사용).
+- 마우스: 탭·칸·버튼 클릭, 올리면 강조 이동. 키보드: **방향키** 강조 이동, **Space/Enter** 실행. 맨 왼쪽 칸에서 ← 를 누르면 탭 줄로 가고 ↑/↓로 탭 전환, → 로 다시 칸으로.
+- 판매 탭: 마차마다 카드 크기 틀(카드 그림 + `x 개수`) + 아래 **판매 +Ng** 버튼. 누르면 그 칸 전부 판매 → 빈 칸. 골드는 정산표에서 조건을 만족하는 가장 큰 값(남는 카드는 버림). 조건은 기존 서버 규칙 그대로(`ServerSellWagon`: 내 턴 1~3단계, 1장은 점유 마차가 모두 1장일 때만). 못 파는 이유는 버튼 아래에 표시.
+- 구매 탭: 칸 선택 → 확인 상자(구매/취소) → 서버 `ServerBuyItem`이 골드 확인 후 지급. 골드 부족이면 가격이 빨간색 + "골드가 부족합니다".
+
+### 11-2. 아이템 등록 (값은 임시)
+- `Private/OreDealStoreCatalog.cpp`의 `GetItems()` 배열에 **한 줄 = 한 칸**: `MakePlayerStateItem(고유이름, 표시이름, 골드가격, 한 세트 개수, PlayerState 변수이름, 아이콘 경로)`. 배열 순서 = 칸 순서(왼쪽 위부터, 최대 8개).
+- 현재: 나무 2개 = 1골드(`BP_PS_Table.Wood` +2). 숫자만 바꾸면 됨.
+- PlayerState 정수 말고 다른 지급 방식이 필요하면 `EOreDealStoreGrant`에 값 추가 + `UOreDealStoreComponent::GrantItem`에 case 추가.
+
+### 11-3. 파일
+- 새 파일: `OreDealStoreCatalog.h/.cpp`(아이템 목록, 마차 표시 구조체), `OreDealStoreComponent.h/.cpp`(PC에 붙음: F 입력, 서버 구매 RPC, 열려 있을 때만 틱 — 골드는 매 프레임, 마차는 0.1초마다 읽어 위젯에 전달), `OreDealStoreWidget.h/.cpp`(화면. 위젯 하나가 클릭/이동을 직접 받고 강조 틀 1개를 옮김. UButton 안 씀).
+- 수정: `OreDealTablePlayerController`(StoreComponent 생성, `InputKey` 맨 앞에서 상점 키 처리, `ToggleSalesMenu`=상점 토글, `OnStoreOpenChanged`로 커서/입력 모드 전환 + 시야 고정, `GetStoreWagons`, 조준점 상호작용 대상은 덱만), `OreDealInteractionWidget`(좌상단 버튼 문구 "상점 (F)", 예전 판매 패널 위젯은 더 이상 만들지 않음).
+- 이미지: 시안에서 잘라 만든 `SourceArt/UI/Store/T_Store_*.png` → `/Game/MaterialTraders/UI/Store/`(BG, SignTop, Slot, Tag, Tab_Sell/Buy/Empty, Button, Paper, Focus). 텍스처 설정: UI 그룹, 밉맵 없음, TC_EditorIcon. 패널 좌표는 시안의 절반 크기(1141x841) 기준으로 `OreDealStoreWidget.cpp` 맨 위 상수.
+- 레벨: `Lvl_Table`의 상인 관련 액터 8개 삭제·저장됨(태그 `OreDealMerchant` 액터 없음 확인).
+
+### 11-4. 같이 한 최적화
+- `AOreDealAuctionBroker::FindDeck/FindBoardFor`가 매 프레임 여러 번 레벨 전체를 훑던 것 → 월드별 캐시(덱 1회, 마차판 목록 1초마다 갱신). 컨트롤러의 덱/마차판 찾기도 이 캐시 사용.
+- 경매 표시가 매 프레임 덱 컴포넌트 전부를 이름 비교하던 것 → 덱별 1회 조회 캐시.
+- 상점 컴포넌트는 닫혀 있으면 틱 꺼짐, 위젯은 상태가 바뀔 때만 다시 그림.
+
+### 11-5. 빌드 방법 (에디터 닫고 전체 빌드)
+- 에디터 종료 → `"C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat" TeamProjectEditor Win64 Development -Project="C:\Project\-README.me-\TeamProject.uproject" -WaitMutex` (약 80초) → 에디터 다시 실행. Blender MCP의 Python `subprocess`로 실행 가능, 로그는 `Saved/Logs/StoreBuild.log`.
+- 2026-11-15 전체 빌드 성공(경매 배치 시점 수정 포함).
+- 에디터 종료/재실행도 Blender Python에서 가능: 엔진의 `Engine/Plugins/Experimental/PythonScriptPlugin/Content/Python/remote_execution.py`를 import → `unreal.SystemLibrary.quit_editor()` (종료 전 `EditorLoadingAndSavingUtils.get_dirty_*_packages()`로 미저장 확인) → 빌드 → `UnrealEditor.exe TeamProject.uproject` 실행. 재실행 후 언리얼 MCP는 자동으로 다시 붙음.
+
+### 11-5b. PIE 확인 (2026-11-15, 3인: 호스트 + 클라 2)
+- 여러 PIE 창을 한 세션으로 묶기: 원격 Python에서 `unreal.EditorLevelLibrary.get_pie_worlds(False)` → 0번 월드에 콘솔 `open /Game/MaterialTraders/Maps/Lvl_Table?listen`, 나머지에 `open 127.0.0.1:7777` → 0번에 `ke * StartGame`. 골드는 PlayerState `AddGold` 호출, 마차 카드는 보드 `AddCard(종류, 마차, PS)` 호출로 채움(BP 변수는 `set_editor_property` 불가).
+- 호스트 뷰포트 포커스: SlateInspector `Click`(레벨 뷰포트 splitter ref) 후 `PressKey`. 클라 창은 조준점 "•" 클릭 후 `PressKey`.
+- 확인됨: 클라에서 F 열기/닫기, 방향키로 탭 이동, 구매 확인 중 F → 취소되고 골드 그대로, 구매(골드 120→119→118, 나무 0→2, 안내 문구), 호스트에서 마차 판매(석탄 4장 → +1g, 칸 비워짐, 골드 숫자 초록 강조), 1장 마차는 판매 불가 안내.
+- 화면이 좁거나 작으면 패널이 잘려서, 뷰포트 크기에 맞춰 패널을 줄이도록 함(`NativeTick`의 Fit, 최대 1배).
+
+### 11-6. 남은 것 / 주의
+- 판매 정산표(`SaleReward`)와 판매 알림의 자원 이름은 팀원 C++의 8종 표를 그대로 씀(카드 5종과 순서 불일치는 팀원 담당 버그).
+- 1장 마차 판매 조건: 서버 코드(`CanSellSingleCardSlot`)는 "마차 2대가 모두 1장"일 때만 허용. README 문구("모든 점유 슬롯이 1개뿐이면")대로면 한쪽이 비고 한쪽이 1장일 때도 팔 수 있어야 하는데 지금은 안 됨 → 팀원 규칙 코드라 그대로 둠, 확인 필요.
+- 마우스 클릭/호버는 코드만 있고 실기 확인은 안 함(키보드만 확인).
+- 세 번째 탭은 빈 칸. 쓸 곳이 정해지면 `UOreDealStoreWidget`의 `Tab == 2` 분기에 페이지 추가.
+
+### 11-7. 임시 저장 — 지금 상태와 이어서 할 것 (2026-11-15 01:10)
+**끝난 것**
+- 상점 코드·이미지·레벨 정리 전부 디스크에 있음. 전체 빌드 2회 성공(두 번째 = 패널 자동 축소 + 간판 윗부분 `T_Store_SignTop` 추가 후).
+- 첫 번째 빌드로 3인 PIE 확인 완료(11-5b 목록).
+
+**아직 확인 안 한 것 (이어서 할 것, 순서대로)**
+1. 두 번째 빌드의 패널 자동 축소: 좁은 뷰포트(에디터 안 호스트 화면)에서 F를 눌러 패널 좌우가 안 잘리는지, 아래 안내 문구가 패널 바로 밑에 붙는지 스크린샷으로 확인.
+2. 마우스: 탭 아이콘 클릭으로 페이지 전환, 칸/판매 버튼 클릭, 올렸을 때 강조 이동, 확인 상자의 구매/취소 클릭.
+3. 상점이 열린 채 게임이 끝나거나 재시작될 때 닫히는지, 채팅 입력 중 F가 무시되는지.
+4. 경매 거래 중(손패 선택 창이 떠 있을 때) F로 상점을 열고 닫아도 경매 입력이 정상으로 돌아오는지.
+5. 11/14 경매 수정(가져온 카드 배치는 덱 위 카드가 다 없어진 뒤에만)도 이번 빌드에 들어갔으니 2인 이상으로 실기 확인.
+6. 팀원용 작업노트 조작키 표 갱신(M → F, 상점 설명), 팀원에게 컨트롤러/InteractionWidget 수정 사실 공유.
+7. 커밋/푸쉬는 사용자가 직접(요청 시 단계별 안내). 새 파일: `Source/TeamProject/*/OreDealStore*`, `Content/MaterialTraders/UI/Store/`, `SourceArt/UI/Store/`, 삭제된 `__ExternalActors__` 8개 포함.
+
+8. 사용자에게 물어볼 것: 1장 마차 판매 조건(11-6)을 README대로 바꿀지.
+
+**참고**: 이 임시 저장 시점에 에디터는 3인 PIE 실행 중(확인 1번 진행 중이었음, 게임 시작됨·각자 골드 120·마차에 테스트용 카드 5장). 확인이 끝나면 PIE 정지. PIE 중에는 BP 컴파일 금지.

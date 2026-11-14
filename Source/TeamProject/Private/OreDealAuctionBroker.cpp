@@ -21,6 +21,33 @@ namespace
 			if (Function->ParmsSize == 0) Object->ProcessEvent(Function, nullptr);
 	}
 
+	/**
+	 * Per-world cache of the table actors. FindDeck / FindBoardFor are called many times every frame by
+	 * the HUD, the floating card display and the player controller, so they must not scan the level each time.
+	 */
+	struct FTableActorCache
+	{
+		TWeakObjectPtr<UWorld> World;
+		TWeakObjectPtr<AActor> Deck;
+		TArray<TWeakObjectPtr<AActor>> Boards;
+		double BoardsTime = -1000.0;
+	};
+
+	// The board list is rebuilt once a second in case boards stream in after the first lookup.
+	constexpr double BoardCacheSeconds = 1.0;
+
+	FTableActorCache& GetTableActorCache(UWorld* World)
+	{
+		// A handful of entries at most: one per PIE world (server + clients share the editor process).
+		static TArray<FTableActorCache> Caches;
+		for (FTableActorCache& Cache : Caches)
+			if (Cache.World.Get() == World) return Cache;
+		Caches.RemoveAll([](const FTableActorCache& Cache) { return !Cache.World.IsValid(); });
+		FTableActorCache& Cache = Caches.AddDefaulted_GetRef();
+		Cache.World = World;
+		return Cache;
+	}
+
 	bool IsValidUniqueIndexList(const TArray<int32>& Indices, int32 Num)
 	{
 		TSet<int32> Seen;
@@ -66,8 +93,13 @@ AOreDealAuctionBroker* AOreDealAuctionBroker::Find(const UObject* WorldContext)
 AActor* AOreDealAuctionBroker::FindDeck(UWorld* World)
 {
 	if (!World) return nullptr;
-	UClass* DeckClass = StaticLoadClass(AActor::StaticClass(), nullptr, DeckClassPath);
-	return DeckClass ? UGameplayStatics::GetActorOfClass(World, DeckClass) : nullptr;
+	FTableActorCache& Cache = GetTableActorCache(World);
+	if (!Cache.Deck.IsValid())
+	{
+		UClass* DeckClass = StaticLoadClass(AActor::StaticClass(), nullptr, DeckClassPath);
+		Cache.Deck = DeckClass ? UGameplayStatics::GetActorOfClass(World, DeckClass) : nullptr;
+	}
+	return Cache.Deck.Get();
 }
 
 void AOreDealAuctionBroker::GetDeckCards(UWorld* World, TArray<int32>& OutCards)
@@ -88,14 +120,25 @@ void AOreDealAuctionBroker::WriteDeckCards(const TArray<int32>& Cards) const
 AActor* AOreDealAuctionBroker::FindBoardFor(UWorld* World, const APawn* Pawn)
 {
 	if (!World || !Pawn) return nullptr;
-	UClass* BoardClass = StaticLoadClass(AActor::StaticClass(), nullptr, BoardClassPath);
-	if (!BoardClass) return nullptr;
-	TArray<AActor*> Boards;
-	UGameplayStatics::GetAllActorsOfClass(World, BoardClass, Boards);
+	FTableActorCache& Cache = GetTableActorCache(World);
+	const double Now = World->GetRealTimeSeconds();
+	if (Cache.Boards.IsEmpty() || Now - Cache.BoardsTime > BoardCacheSeconds || Now < Cache.BoardsTime)
+	{
+		Cache.Boards.Reset();
+		Cache.BoardsTime = Now;
+		if (UClass* BoardClass = StaticLoadClass(AActor::StaticClass(), nullptr, BoardClassPath))
+		{
+			TArray<AActor*> Boards;
+			UGameplayStatics::GetAllActorsOfClass(World, BoardClass, Boards);
+			for (AActor* Board : Boards) Cache.Boards.Add(Board);
+		}
+	}
 	AActor* Best = nullptr;
 	double BestDistance = TNumericLimits<double>::Max();
-	for (AActor* Board : Boards)
+	for (const TWeakObjectPtr<AActor>& WeakBoard : Cache.Boards)
 	{
+		AActor* Board = WeakBoard.Get();
+		if (!Board) continue;
 		const double Distance = FVector::DistSquared(Pawn->GetActorLocation(), Board->GetActorLocation());
 		if (Distance < BestDistance) { BestDistance = Distance; Best = Board; }
 	}
@@ -493,7 +536,8 @@ void AOreDealAuctionBroker::EnterConsume()
 
 void AOreDealAuctionBroker::PlacePending(APlayerState* Player, int32 WagonIndex)
 {
-	if (!HasAuthority() || Stage == EOreDealAuctionStage::Idle || !IsValid(Player)) return;
+	// 가져온 카드 are placed only after every 덱 위 카드 is gone (3/4), never during the trade itself.
+	if (!HasAuthority() || Stage != EOreDealAuctionStage::Consume || !IsValid(Player)) return;
 	FOreDealAuctionSeat* Seat = FindSeatMutable(Player);
 	if (!Seat || Seat->PendingCards.IsEmpty()) return;
 	AActor* Board = FindBoardFor(GetWorld(), Player->GetPawn());

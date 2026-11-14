@@ -22,6 +22,8 @@
 #include "OreDealMarketBroker.h"
 #include "OreDealAuctionBroker.h"
 #include "OreDealAuctionComponent.h"
+#include "OreDealStoreCatalog.h"
+#include "OreDealStoreComponent.h"
 #include "OreDealTurnBridge.h"
 #include "UObject/ConstructorHelpers.h"
 #include "UObject/UnrealType.h"
@@ -61,33 +63,15 @@ namespace
 		return OccupiedWagons == 2;
 	}
 
-	UClass* LoadBlueprintClass(const TCHAR* Path)
-	{
-		return StaticLoadClass(AActor::StaticClass(), nullptr, Path);
-	}
-
+	// Both lookups go through the auction broker's per-world cache, so calling them every frame is cheap.
 	AActor* FindBoardForPawn(UWorld* World, APawn* Pawn)
 	{
-		if (!World || !Pawn) return nullptr;
-		UClass* BoardClass = LoadBlueprintClass(TEXT("/Game/MaterialTraders/Blueprints/BP_CardBoard.BP_CardBoard_C"));
-		if (!BoardClass) return nullptr;
-		TArray<AActor*> Boards;
-		UGameplayStatics::GetAllActorsOfClass(World, BoardClass, Boards);
-		AActor* Best = nullptr;
-		double BestDistance = TNumericLimits<double>::Max();
-		for (AActor* Board : Boards)
-		{
-			const double Distance = FVector::DistSquared(Pawn->GetActorLocation(), Board->GetActorLocation());
-			if (Distance < BestDistance) { BestDistance = Distance; Best = Board; }
-		}
-		return Best;
+		return AOreDealAuctionBroker::FindBoardFor(World, Pawn);
 	}
 
 	AActor* FindCardDeck(UWorld* World)
 	{
-		if (!World) return nullptr;
-		UClass* DeckClass = LoadBlueprintClass(TEXT("/Game/MaterialTraders/Blueprints/BP_CardDeck.BP_CardDeck_C"));
-		return DeckClass ? UGameplayStatics::GetActorOfClass(World, DeckClass) : nullptr;
+		return AOreDealAuctionBroker::FindDeck(World);
 	}
 
 	bool IsPlayersTurn(AActor* Deck, APlayerState* PlayerState, int32& OutPhase)
@@ -109,6 +93,7 @@ AOreDealTablePlayerController::AOreDealTablePlayerController()
 	if (DefaultContext.Succeeded()) DefaultMappingContext = DefaultContext.Object;
 	if (MouseLookContext.Succeeded()) MouseLookMappingContext = MouseLookContext.Object;
 	AuctionComponent = CreateDefaultSubobject<UOreDealAuctionComponent>(TEXT("OreDealAuction"));
+	StoreComponent = CreateDefaultSubobject<UOreDealStoreComponent>(TEXT("OreDealStore"));
 }
 
 void AOreDealTablePlayerController::BeginPlay()
@@ -368,6 +353,10 @@ void AOreDealTablePlayerController::UpdateRotation(float DeltaTime)
 
 bool AOreDealTablePlayerController::InputKey(const FInputKeyEventArgs& Params)
 {
+	// Store (F): opens/closes with F and, while open, takes every keyboard key before anything else.
+	if (IsLocalController() && StoreComponent && (!InteractionWidget || !InteractionWidget->IsChatExpanded()) &&
+		StoreComponent->HandleInputKey(Params.Key, Params.Event))
+		return true;
 	if (IsLocalController() && AuctionComponent &&
 		(!InteractionWidget || (!InteractionWidget->IsChatExpanded() && !InteractionWidget->IsSalesOpen())) &&
 		AuctionComponent->HandleInputKey(Params.Key, Params.Event))
@@ -415,11 +404,6 @@ bool AOreDealTablePlayerController::InputKey(const FInputKeyEventArgs& Params)
 			FHitResult Hit;
 			const bool bHitTarget = TraceCenterPointer(Hit);
 			AActor* HitActor = bHitTarget ? Hit.GetActor() : nullptr;
-			if (HitActor && HitActor->ActorHasTag(TEXT("OreDealMerchant")))
-			{
-				ToggleSalesMenu();
-				return true;
-			}
 			if (HitActor == FindCardDeck(GetWorld()))
 			{
 				int32 Phase = INDEX_NONE;
@@ -478,11 +462,6 @@ bool AOreDealTablePlayerController::InputKey(const FInputKeyEventArgs& Params)
 				IsPlayersTurn(Deck, PlayerState, Phase) && Phase == 3) ServerRequestSupplyDraw();
 			return true;
 		}
-		if (Params.Key == EKeys::M && InteractionWidget && !InteractionWidget->IsChatExpanded())
-		{
-			ToggleSalesMenu();
-			return true;
-		}
 	}
 
 	if (IsLocalController() && (Params.Event == IE_Pressed || Params.Event == IE_Repeat))
@@ -523,16 +502,60 @@ void AOreDealTablePlayerController::ClearChatEnterGuard()
 
 void AOreDealTablePlayerController::ToggleSalesMenu()
 {
-	if (!InteractionWidget || InteractionWidget->IsChatExpanded() || InteractionWidget->IsHandRackOpen()) return;
-	const bool bOpen = !InteractionWidget->IsSalesOpen();
-	InteractionWidget->SetSalesOpen(bOpen);
+	// The old sales panel was replaced by the store window (F).
+	if (StoreComponent && (!InteractionWidget || !InteractionWidget->IsChatExpanded())) StoreComponent->ToggleStore();
+}
+
+void AOreDealTablePlayerController::OnStoreOpenChanged(bool bOpen)
+{
+	if (!IsLocalController()) return;
 	if (bOpen)
 	{
-		if (!InteractionWidget->IsInViewport()) InteractionWidget->AddToViewport(32000);
-		InteractionWidget->SetVisibility(ESlateVisibility::Visible);
-		InteractionWidget->RefreshSales();
+		if (HandViewWidget) HandViewWidget->SetOpen(false);
+		if (InteractionWidget)
+		{
+			InteractionWidget->SetSalesOpen(false);
+			InteractionWidget->SetHandRackOpen(false);
+		}
 	}
-	ApplyInteractionInputMode(bOpen, false);
+	const bool bChat = InteractionWidget && InteractionWidget->IsChatExpanded();
+	ApplyInteractionInputMode(bOpen || bChat, false);
+	// Keep the camera still while the cursor is used on the store (ApplyInteractionInputMode re-enables look).
+	if (bOpen) SetIgnoreLookInput(true);
+}
+
+void AOreDealTablePlayerController::GetStoreWagons(TArray<FOreDealStoreWagonView>& OutWagons) const
+{
+	OutWagons.Reset();
+	AActor* Board = GetPlayerBoard();
+	if (!Board) return;
+	const FArrayProperty* TypesProp = FindFProperty<FArrayProperty>(Board->GetClass(), TEXT("wagonTypes"));
+	const FArrayProperty* CountsProp = FindFProperty<FArrayProperty>(Board->GetClass(), TEXT("wagonCounts"));
+	const FIntProperty* TypesInner = TypesProp ? CastField<FIntProperty>(TypesProp->Inner) : nullptr;
+	const FIntProperty* CountsInner = CountsProp ? CastField<FIntProperty>(CountsProp->Inner) : nullptr;
+	if (!TypesProp || !CountsProp || !TypesInner || !CountsInner) return;
+	FScriptArrayHelper Types(TypesProp, TypesProp->ContainerPtrToValuePtr<void>(Board));
+	FScriptArrayHelper Counts(CountsProp, CountsProp->ContainerPtrToValuePtr<void>(Board));
+
+	// Same rules as ServerSellWagon: only on my turn in phases 1~3, and a lone card only when every loaded wagon holds one.
+	int32 Phase = INDEX_NONE;
+	const bool bSalePhase = IsPlayersTurn(FindCardDeck(GetWorld()), PlayerState, Phase) && Phase >= 0 && Phase <= 2;
+	const int32 WagonCount = FMath::Min3(Types.Num(), Counts.Num(), 3);
+	for (int32 Index = 0; Index < WagonCount; ++Index)
+	{
+		FOreDealStoreWagonView& View = OutWagons.AddDefaulted_GetRef();
+		const int32 Resource = TypesInner->GetPropertyValue(Types.GetRawPtr(Index));
+		const int32 Count = CountsInner->GetPropertyValue(Counts.GetRawPtr(Index));
+		if (Resource < 0 || Resource >= UE_ARRAY_COUNT(ResourceNames) || Count <= 0) continue;
+		View.Resource = Resource;
+		View.Count = Count;
+		View.Reward = SaleReward(Resource, Count);
+		const bool bEnoughCards = Count >= 2 || CanSellSingleCardSlot(Counts, CountsInner, Index);
+		View.bCanSell = bSalePhase && bEnoughCards;
+		if (!bSalePhase) View.Note = TEXT("내 턴 1~3단계에만 판매할 수 있습니다");
+		else if (!bEnoughCards) View.Note = TEXT("1장은 다른 마차도 1장일 때만 판매");
+		else if (View.Reward <= 0) View.Note = TEXT("개수가 모자라 0골드로 판매됩니다");
+	}
 }
 
 void AOreDealTablePlayerController::ToggleHandRack(AActor* RackActor)
@@ -869,37 +892,22 @@ bool AOreDealTablePlayerController::TraceCenterPointer(FHitResult& OutHit) const
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(OreDealCenterPointer), false);
 	QueryParams.AddIgnoredActor(GetPawn());
 	const FVector RayEnd = RayOrigin + RayDirection.GetSafeNormal() * 10000.0f;
-	const auto IsInteractive = [this](AActor* Actor)
-	{
-		if (!IsValid(Actor)) return false;
-		if (Actor->ActorHasTag(TEXT("OreDealMerchant"))) return true;
-		return Actor == FindCardDeck(GetWorld());
-	};
+	// The draw deck is the only world object the centre pointer interacts with.
+	AActor* Deck = FindCardDeck(World);
+	if (!Deck) return false;
+	const auto IsInteractive = [Deck](AActor* Actor) { return Actor == Deck; };
 	if (World->LineTraceSingleByChannel(OutHit, RayOrigin, RayEnd, ECC_Visibility, QueryParams) && IsInteractive(OutHit.GetActor())) return true;
 	if (World->LineTraceSingleByChannel(OutHit, RayOrigin, RayEnd, ECC_Camera, QueryParams) && IsInteractive(OutHit.GetActor())) return true;
 
-	// Some table meshes have no Visibility/Camera response. Fall back to their bounds so the
-	// center pointer still activates tagged merchant actors and the draw deck.
-	TArray<AActor*> Candidates;
-	UGameplayStatics::GetAllActorsWithTag(World, TEXT("OreDealMerchant"), Candidates);
-	if (AActor* Deck = FindCardDeck(World)) Candidates.AddUnique(Deck);
-	float NearestDistance = TNumericLimits<float>::Max();
-	AActor* NearestActor = nullptr;
-	for (AActor* Candidate : Candidates)
-	{
-		if (!IsInteractive(Candidate)) continue;
-		const FBox Bounds = Candidate->GetComponentsBoundingBox(true);
-		const FVector ToBounds = Bounds.GetCenter() - RayOrigin;
-		const float AlongRay = FVector::DotProduct(ToBounds, RayDirection.GetSafeNormal());
-		if (AlongRay < 0.0f || AlongRay > 10000.0f || AlongRay >= NearestDistance) continue;
-		const float PerpendicularDistance = FMath::PointDistToLine(Bounds.GetCenter(), RayOrigin, RayDirection.GetSafeNormal());
-		if (PerpendicularDistance > Bounds.GetExtent().Size()) continue;
-		NearestDistance = AlongRay;
-		NearestActor = Candidate;
-	}
-	if (!NearestActor) return false;
-	OutHit = FHitResult(NearestActor, Cast<UPrimitiveComponent>(NearestActor->GetRootComponent()), RayOrigin + RayDirection.GetSafeNormal() * NearestDistance, -RayDirection.GetSafeNormal());
-	OutHit.Distance = NearestDistance;
+	// The deck mesh may have no Visibility/Camera response. Fall back to its bounds so the
+	// centre pointer still activates it.
+	const FVector Direction = RayDirection.GetSafeNormal();
+	const FBox Bounds = Deck->GetComponentsBoundingBox(true);
+	const float AlongRay = FVector::DotProduct(Bounds.GetCenter() - RayOrigin, Direction);
+	if (AlongRay < 0.0f || AlongRay > 10000.0f) return false;
+	if (FMath::PointDistToLine(Bounds.GetCenter(), Direction, RayOrigin) > Bounds.GetExtent().Size()) return false;
+	OutHit = FHitResult(Deck, Cast<UPrimitiveComponent>(Deck->GetRootComponent()), RayOrigin + Direction * AlongRay, -Direction);
+	OutHit.Distance = AlongRay;
 	return true;
 }
 
