@@ -1,0 +1,352 @@
+Theme,Asset,Role,State,Native width,Native height,9-slice L T R B,Text padding L T R B
+cream,dialogue_wide,dialogue,,608,84,12 8 28 16,20 14 32 12
+cream,dialogue_compact,dialogue,,448,84,12 8 28 16,20 14 32 12
+cream,narration,narration,,608,64,12 8 28 16,20 12 32 12
+cream,nameplate,nameplate,,144,24,12 8 16 8,12 5 12 6
+cream,menu_panel,panel,,288,220,12 8 16 8,16 16 16 16
+cream,modal,panel,,320,144,12 8 16 8,20 16 20 16
+cream,tooltip,panel,,160,32,12 8 16 8,12 8 12 8
+cream,notification,panel,,224,32,12 8 16 8,12 8 12 8
+cream,quickbar,panel,,608,24,12 8 16 8,10 5 10 5
+cream,button_idle,button,idle,144,32,20 14 16 10,20 8 14 9
+cream,button_hover,button,hover,144,32,20 14 16 10,20 8 14 9
+cream,button_pressed,button,pressed,144,32,20 14 16 10,20 8 14 9
+cream,button_selected,button,selected,144,32,20 14 16 10,20 8 14 9
+cream,button_selected_hover,button,selected_hover,144,32,20 14 16 10,20 8 14 9
+cream,button_disabled,button,disabled,144,32,20 14 16 10,20 8 14 9
+cream,choice_idle,choice,idle,384,36,20 14 16 10,20 8 14 9
+cream,choice_hover,choice,hover,384,36,20 14 16 10,20 8 14 9
+cream,choice_pressed,choice,pressed,384,36,20 14 16 10,20 8 14 9
+cream,choice_selected,choice,selected,384,36,20 14 16 10,20 8 14 9
+cream,choice_selected_hover,choice,selected_hover,384,36,20 14 16 10,20 8 14 9
+cream,choice_disabled,choice,disabled,384,36,20 14 16 10,20 8 14 9
+cream,small_button_idle,small_button,idle,64,32,20 14 16 10,20 8 14 9
+cream,small_button_hover,small_button,hover,64,32,20 14 16 10,20 8 14 9
+cream,small_button_pressed,small_button,pressed,64,32,20 14 16 10,20 8 14 9
+cream,small_button_selected,small_button,selected,64,32,20 14 16 10,20 8 14 9
+cream,small_button_selected_hover,small_button,selected_hover,64,32,20 14 16 10,20 8 14 9
+cream,small_button_disabled,small_button,disabled,64,32,20 14 16 10,20 8 14 9
+cream,tab_idle,tab,idle,72,32,20 14 16 10,20 8 14 9
+cream,tab_hover,tab,hover,72,32,20 14 16 10,20 8 14 9
+cream,tab_pressed,tab,pressed,72,32,20 14 16 10,20 8 14 9
+cream,tab_selected,tab,selected,72,32,20 14 16 10,20 8 14 9
+cream,tab_selected_hover,tab,selected_hover,72,32,20 14 16 10,20 8 14 9
+cream,tab_disabled,tab,disabled,72,32,20 14 16 10,20 8 14 9
+cream,save_slot_idle,save_slot,idle,176,112,20 14 16 10,12 12 12 12
+cream,save_slot_hover,save_slot,hover,176,112,20 14 16 10,12 12 12 12
+cream,save_slot_pressed,save_slot,pressed,176,112,20 14 16 10,12 12 12 12
+cream,save_slot_selected,save_slot,selected,176,112,20 14 16 10,12 12 12 12
+cream,save_slot_selected_hover,save_slot,selected_hover,176,112,20 14 16 10,12 12 12 12
+cream,save_slot_disabled,save_slot,disabled,176,112,20 14 16 10,12 12 12 12
+cream,checkbox_off_idle,checkbox,idle,18,18,,
+cream,checkbox_on_idle,checkbox,idle,18,18,,
+cream,icon_next_idle,icon,idle,16,16,,
+cream,icon_back_idle,icon,idle,16,16,,
+cream,icon_up_idle,icon,idle,16,16,,
+cream,icon_down_idle,icon,idle,16,16,,
+cream,icon_play_idle,icon,idle,16,16,,
+cream,icon_pause_idle,icon,idle,16,16,,
+cream,icon_skip_idle,icon,idle,16,16,,
+cream,icon_menu_idle,icon,idle,16,16,,
+cream,icon_close_idle,icon,idle,16,16,,
+cream,icon_save_idle,icon,idle,16,16,,
+cream,icon_load_idle,icon,idle,16,16,,
+cream,icon_history_idle,icon,idle,16,16,,
+cream,icon_settings_idle,icon,idle,16,16,,
+cream,icon_sound_idle,icon,idle,16,16,,
+cream,icon_mute_idle,icon,idle,16,16,,
+cream,icon_check_idle,icon,idle,16,16,,
+cream,icon_home_idle,icon,idle,16,16,,
+cream,icon_expand_idle,icon,idle,16,16,,
+cream,icon_heart_idle,icon,idle,16,16,,
+cream,icon_wave_idle,icon,idle,16,16,,
+cream,checkbox_off_hover,checkbox,hover,18,18,,
+cream,checkbox_on_hover,checkbox,hover,18,18,,
+cream,icon_next_hover,icon,hover,16,16,,
+cream,icon_back_hover,icon,hover,16,16,,
+cream,icon_up_hover,icon,hover,16,16,,
+cream,icon_down_hover,icon,hover,16,16,,
+cream,icon_play_hover,icon,hover,16,16,,
+cream,icon_pause_hover,icon,hover,16,16,,
+cream,icon_skip_hover,icon,hover,16,16,,
+cream,icon_menu_hover,icon,hover,16,16,,
+cream,icon_close_hover,icon,hover,16,16,,
+cream,icon_save_hover,icon,hover,16,16,,
+cream,icon_load_hover,icon,hover,16,16,,
+cream,icon_history_hover,icon,hover,16,16,,
+cream,icon_settings_hover,icon,hover,16,16,,
+cream,icon_sound_hover,icon,hover,16,16,,
+cream,icon_mute_hover,icon,hover,16,16,,
+cream,icon_check_hover,icon,hover,16,16,,
+cream,icon_home_hover,icon,hover,16,16,,
+cream,icon_expand_hover,icon,hover,16,16,,
+cream,icon_heart_hover,icon,hover,16,16,,
+cream,icon_wave_hover,icon,hover,16,16,,
+cream,checkbox_off_disabled,checkbox,disabled,18,18,,
+cream,checkbox_on_disabled,checkbox,disabled,18,18,,
+cream,icon_next_disabled,icon,disabled,16,16,,
+cream,icon_back_disabled,icon,disabled,16,16,,
+cream,icon_up_disabled,icon,disabled,16,16,,
+cream,icon_down_disabled,icon,disabled,16,16,,
+cream,icon_play_disabled,icon,disabled,16,16,,
+cream,icon_pause_disabled,icon,disabled,16,16,,
+cream,icon_skip_disabled,icon,disabled,16,16,,
+cream,icon_menu_disabled,icon,disabled,16,16,,
+cream,icon_close_disabled,icon,disabled,16,16,,
+cream,icon_save_disabled,icon,disabled,16,16,,
+cream,icon_load_disabled,icon,disabled,16,16,,
+cream,icon_history_disabled,icon,disabled,16,16,,
+cream,icon_settings_disabled,icon,disabled,16,16,,
+cream,icon_sound_disabled,icon,disabled,16,16,,
+cream,icon_mute_disabled,icon,disabled,16,16,,
+cream,icon_check_disabled,icon,disabled,16,16,,
+cream,icon_home_disabled,icon,disabled,16,16,,
+cream,icon_expand_disabled,icon,disabled,16,16,,
+cream,icon_heart_disabled,icon,disabled,16,16,,
+cream,icon_wave_disabled,icon,disabled,16,16,,
+cream,continue_0,continue_animation,,12,12,,
+cream,continue_1,continue_animation,,12,12,,
+cream,continue_2,continue_animation,,12,12,,
+cream,slider_thumb_idle,slider,idle,12,20,,
+cream,slider_track_idle,slider,idle,128,20,4 8 4 8,
+cream,slider_thumb_hover,slider,hover,12,20,,
+cream,slider_track_hover,slider,hover,128,20,4 8 4 8,
+cream,scrollbar_track_idle,scrollbar,idle,8,64,0 4 0 4,
+cream,scrollbar_thumb_idle,scrollbar,idle,12,32,4 8 4 8,
+cream,scrollbar_track_hover,scrollbar,hover,8,64,0 4 0 4,
+cream,scrollbar_thumb_hover,scrollbar,hover,12,32,4 8 4 8,
+cream,cursor,cursor,,16,16,,
+sunset,dialogue_wide,dialogue,,608,84,12 8 28 16,20 14 32 12
+sunset,dialogue_compact,dialogue,,448,84,12 8 28 16,20 14 32 12
+sunset,narration,narration,,608,64,12 8 28 16,20 12 32 12
+sunset,nameplate,nameplate,,144,24,12 8 16 8,12 5 12 6
+sunset,menu_panel,panel,,288,220,12 8 16 8,16 16 16 16
+sunset,modal,panel,,320,144,12 8 16 8,20 16 20 16
+sunset,tooltip,panel,,160,32,12 8 16 8,12 8 12 8
+sunset,notification,panel,,224,32,12 8 16 8,12 8 12 8
+sunset,quickbar,panel,,608,24,12 8 16 8,10 5 10 5
+sunset,button_idle,button,idle,144,32,20 14 16 10,20 8 14 9
+sunset,button_hover,button,hover,144,32,20 14 16 10,20 8 14 9
+sunset,button_pressed,button,pressed,144,32,20 14 16 10,20 8 14 9
+sunset,button_selected,button,selected,144,32,20 14 16 10,20 8 14 9
+sunset,button_selected_hover,button,selected_hover,144,32,20 14 16 10,20 8 14 9
+sunset,button_disabled,button,disabled,144,32,20 14 16 10,20 8 14 9
+sunset,choice_idle,choice,idle,384,36,20 14 16 10,20 8 14 9
+sunset,choice_hover,choice,hover,384,36,20 14 16 10,20 8 14 9
+sunset,choice_pressed,choice,pressed,384,36,20 14 16 10,20 8 14 9
+sunset,choice_selected,choice,selected,384,36,20 14 16 10,20 8 14 9
+sunset,choice_selected_hover,choice,selected_hover,384,36,20 14 16 10,20 8 14 9
+sunset,choice_disabled,choice,disabled,384,36,20 14 16 10,20 8 14 9
+sunset,small_button_idle,small_button,idle,64,32,20 14 16 10,20 8 14 9
+sunset,small_button_hover,small_button,hover,64,32,20 14 16 10,20 8 14 9
+sunset,small_button_pressed,small_button,pressed,64,32,20 14 16 10,20 8 14 9
+sunset,small_button_selected,small_button,selected,64,32,20 14 16 10,20 8 14 9
+sunset,small_button_selected_hover,small_button,selected_hover,64,32,20 14 16 10,20 8 14 9
+sunset,small_button_disabled,small_button,disabled,64,32,20 14 16 10,20 8 14 9
+sunset,tab_idle,tab,idle,72,32,20 14 16 10,20 8 14 9
+sunset,tab_hover,tab,hover,72,32,20 14 16 10,20 8 14 9
+sunset,tab_pressed,tab,pressed,72,32,20 14 16 10,20 8 14 9
+sunset,tab_selected,tab,selected,72,32,20 14 16 10,20 8 14 9
+sunset,tab_selected_hover,tab,selected_hover,72,32,20 14 16 10,20 8 14 9
+sunset,tab_disabled,tab,disabled,72,32,20 14 16 10,20 8 14 9
+sunset,save_slot_idle,save_slot,idle,176,112,20 14 16 10,12 12 12 12
+sunset,save_slot_hover,save_slot,hover,176,112,20 14 16 10,12 12 12 12
+sunset,save_slot_pressed,save_slot,pressed,176,112,20 14 16 10,12 12 12 12
+sunset,save_slot_selected,save_slot,selected,176,112,20 14 16 10,12 12 12 12
+sunset,save_slot_selected_hover,save_slot,selected_hover,176,112,20 14 16 10,12 12 12 12
+sunset,save_slot_disabled,save_slot,disabled,176,112,20 14 16 10,12 12 12 12
+sunset,checkbox_off_idle,checkbox,idle,18,18,,
+sunset,checkbox_on_idle,checkbox,idle,18,18,,
+sunset,icon_next_idle,icon,idle,16,16,,
+sunset,icon_back_idle,icon,idle,16,16,,
+sunset,icon_up_idle,icon,idle,16,16,,
+sunset,icon_down_idle,icon,idle,16,16,,
+sunset,icon_play_idle,icon,idle,16,16,,
+sunset,icon_pause_idle,icon,idle,16,16,,
+sunset,icon_skip_idle,icon,idle,16,16,,
+sunset,icon_menu_idle,icon,idle,16,16,,
+sunset,icon_close_idle,icon,idle,16,16,,
+sunset,icon_save_idle,icon,idle,16,16,,
+sunset,icon_load_idle,icon,idle,16,16,,
+sunset,icon_history_idle,icon,idle,16,16,,
+sunset,icon_settings_idle,icon,idle,16,16,,
+sunset,icon_sound_idle,icon,idle,16,16,,
+sunset,icon_mute_idle,icon,idle,16,16,,
+sunset,icon_check_idle,icon,idle,16,16,,
+sunset,icon_home_idle,icon,idle,16,16,,
+sunset,icon_expand_idle,icon,idle,16,16,,
+sunset,icon_heart_idle,icon,idle,16,16,,
+sunset,icon_wave_idle,icon,idle,16,16,,
+sunset,checkbox_off_hover,checkbox,hover,18,18,,
+sunset,checkbox_on_hover,checkbox,hover,18,18,,
+sunset,icon_next_hover,icon,hover,16,16,,
+sunset,icon_back_hover,icon,hover,16,16,,
+sunset,icon_up_hover,icon,hover,16,16,,
+sunset,icon_down_hover,icon,hover,16,16,,
+sunset,icon_play_hover,icon,hover,16,16,,
+sunset,icon_pause_hover,icon,hover,16,16,,
+sunset,icon_skip_hover,icon,hover,16,16,,
+sunset,icon_menu_hover,icon,hover,16,16,,
+sunset,icon_close_hover,icon,hover,16,16,,
+sunset,icon_save_hover,icon,hover,16,16,,
+sunset,icon_load_hover,icon,hover,16,16,,
+sunset,icon_history_hover,icon,hover,16,16,,
+sunset,icon_settings_hover,icon,hover,16,16,,
+sunset,icon_sound_hover,icon,hover,16,16,,
+sunset,icon_mute_hover,icon,hover,16,16,,
+sunset,icon_check_hover,icon,hover,16,16,,
+sunset,icon_home_hover,icon,hover,16,16,,
+sunset,icon_expand_hover,icon,hover,16,16,,
+sunset,icon_heart_hover,icon,hover,16,16,,
+sunset,icon_wave_hover,icon,hover,16,16,,
+sunset,checkbox_off_disabled,checkbox,disabled,18,18,,
+sunset,checkbox_on_disabled,checkbox,disabled,18,18,,
+sunset,icon_next_disabled,icon,disabled,16,16,,
+sunset,icon_back_disabled,icon,disabled,16,16,,
+sunset,icon_up_disabled,icon,disabled,16,16,,
+sunset,icon_down_disabled,icon,disabled,16,16,,
+sunset,icon_play_disabled,icon,disabled,16,16,,
+sunset,icon_pause_disabled,icon,disabled,16,16,,
+sunset,icon_skip_disabled,icon,disabled,16,16,,
+sunset,icon_menu_disabled,icon,disabled,16,16,,
+sunset,icon_close_disabled,icon,disabled,16,16,,
+sunset,icon_save_disabled,icon,disabled,16,16,,
+sunset,icon_load_disabled,icon,disabled,16,16,,
+sunset,icon_history_disabled,icon,disabled,16,16,,
+sunset,icon_settings_disabled,icon,disabled,16,16,,
+sunset,icon_sound_disabled,icon,disabled,16,16,,
+sunset,icon_mute_disabled,icon,disabled,16,16,,
+sunset,icon_check_disabled,icon,disabled,16,16,,
+sunset,icon_home_disabled,icon,disabled,16,16,,
+sunset,icon_expand_disabled,icon,disabled,16,16,,
+sunset,icon_heart_disabled,icon,disabled,16,16,,
+sunset,icon_wave_disabled,icon,disabled,16,16,,
+sunset,continue_0,continue_animation,,12,12,,
+sunset,continue_1,continue_animation,,12,12,,
+sunset,continue_2,continue_animation,,12,12,,
+sunset,slider_thumb_idle,slider,idle,12,20,,
+sunset,slider_track_idle,slider,idle,128,20,4 8 4 8,
+sunset,slider_thumb_hover,slider,hover,12,20,,
+sunset,slider_track_hover,slider,hover,128,20,4 8 4 8,
+sunset,scrollbar_track_idle,scrollbar,idle,8,64,0 4 0 4,
+sunset,scrollbar_thumb_idle,scrollbar,idle,12,32,4 8 4 8,
+sunset,scrollbar_track_hover,scrollbar,hover,8,64,0 4 0 4,
+sunset,scrollbar_thumb_hover,scrollbar,hover,12,32,4 8 4 8,
+sunset,cursor,cursor,,16,16,,
+midnight,dialogue_wide,dialogue,,608,84,12 8 28 16,20 14 32 12
+midnight,dialogue_compact,dialogue,,448,84,12 8 28 16,20 14 32 12
+midnight,narration,narration,,608,64,12 8 28 16,20 12 32 12
+midnight,nameplate,nameplate,,144,24,12 8 16 8,12 5 12 6
+midnight,menu_panel,panel,,288,220,12 8 16 8,16 16 16 16
+midnight,modal,panel,,320,144,12 8 16 8,20 16 20 16
+midnight,tooltip,panel,,160,32,12 8 16 8,12 8 12 8
+midnight,notification,panel,,224,32,12 8 16 8,12 8 12 8
+midnight,quickbar,panel,,608,24,12 8 16 8,10 5 10 5
+midnight,button_idle,button,idle,144,32,20 14 16 10,20 8 14 9
+midnight,button_hover,button,hover,144,32,20 14 16 10,20 8 14 9
+midnight,button_pressed,button,pressed,144,32,20 14 16 10,20 8 14 9
+midnight,button_selected,button,selected,144,32,20 14 16 10,20 8 14 9
+midnight,button_selected_hover,button,selected_hover,144,32,20 14 16 10,20 8 14 9
+midnight,button_disabled,button,disabled,144,32,20 14 16 10,20 8 14 9
+midnight,choice_idle,choice,idle,384,36,20 14 16 10,20 8 14 9
+midnight,choice_hover,choice,hover,384,36,20 14 16 10,20 8 14 9
+midnight,choice_pressed,choice,pressed,384,36,20 14 16 10,20 8 14 9
+midnight,choice_selected,choice,selected,384,36,20 14 16 10,20 8 14 9
+midnight,choice_selected_hover,choice,selected_hover,384,36,20 14 16 10,20 8 14 9
+midnight,choice_disabled,choice,disabled,384,36,20 14 16 10,20 8 14 9
+midnight,small_button_idle,small_button,idle,64,32,20 14 16 10,20 8 14 9
+midnight,small_button_hover,small_button,hover,64,32,20 14 16 10,20 8 14 9
+midnight,small_button_pressed,small_button,pressed,64,32,20 14 16 10,20 8 14 9
+midnight,small_button_selected,small_button,selected,64,32,20 14 16 10,20 8 14 9
+midnight,small_button_selected_hover,small_button,selected_hover,64,32,20 14 16 10,20 8 14 9
+midnight,small_button_disabled,small_button,disabled,64,32,20 14 16 10,20 8 14 9
+midnight,tab_idle,tab,idle,72,32,20 14 16 10,20 8 14 9
+midnight,tab_hover,tab,hover,72,32,20 14 16 10,20 8 14 9
+midnight,tab_pressed,tab,pressed,72,32,20 14 16 10,20 8 14 9
+midnight,tab_selected,tab,selected,72,32,20 14 16 10,20 8 14 9
+midnight,tab_selected_hover,tab,selected_hover,72,32,20 14 16 10,20 8 14 9
+midnight,tab_disabled,tab,disabled,72,32,20 14 16 10,20 8 14 9
+midnight,save_slot_idle,save_slot,idle,176,112,20 14 16 10,12 12 12 12
+midnight,save_slot_hover,save_slot,hover,176,112,20 14 16 10,12 12 12 12
+midnight,save_slot_pressed,save_slot,pressed,176,112,20 14 16 10,12 12 12 12
+midnight,save_slot_selected,save_slot,selected,176,112,20 14 16 10,12 12 12 12
+midnight,save_slot_selected_hover,save_slot,selected_hover,176,112,20 14 16 10,12 12 12 12
+midnight,save_slot_disabled,save_slot,disabled,176,112,20 14 16 10,12 12 12 12
+midnight,checkbox_off_idle,checkbox,idle,18,18,,
+midnight,checkbox_on_idle,checkbox,idle,18,18,,
+midnight,icon_next_idle,icon,idle,16,16,,
+midnight,icon_back_idle,icon,idle,16,16,,
+midnight,icon_up_idle,icon,idle,16,16,,
+midnight,icon_down_idle,icon,idle,16,16,,
+midnight,icon_play_idle,icon,idle,16,16,,
+midnight,icon_pause_idle,icon,idle,16,16,,
+midnight,icon_skip_idle,icon,idle,16,16,,
+midnight,icon_menu_idle,icon,idle,16,16,,
+midnight,icon_close_idle,icon,idle,16,16,,
+midnight,icon_save_idle,icon,idle,16,16,,
+midnight,icon_load_idle,icon,idle,16,16,,
+midnight,icon_history_idle,icon,idle,16,16,,
+midnight,icon_settings_idle,icon,idle,16,16,,
+midnight,icon_sound_idle,icon,idle,16,16,,
+midnight,icon_mute_idle,icon,idle,16,16,,
+midnight,icon_check_idle,icon,idle,16,16,,
+midnight,icon_home_idle,icon,idle,16,16,,
+midnight,icon_expand_idle,icon,idle,16,16,,
+midnight,icon_heart_idle,icon,idle,16,16,,
+midnight,icon_wave_idle,icon,idle,16,16,,
+midnight,checkbox_off_hover,checkbox,hover,18,18,,
+midnight,checkbox_on_hover,checkbox,hover,18,18,,
+midnight,icon_next_hover,icon,hover,16,16,,
+midnight,icon_back_hover,icon,hover,16,16,,
+midnight,icon_up_hover,icon,hover,16,16,,
+midnight,icon_down_hover,icon,hover,16,16,,
+midnight,icon_play_hover,icon,hover,16,16,,
+midnight,icon_pause_hover,icon,hover,16,16,,
+midnight,icon_skip_hover,icon,hover,16,16,,
+midnight,icon_menu_hover,icon,hover,16,16,,
+midnight,icon_close_hover,icon,hover,16,16,,
+midnight,icon_save_hover,icon,hover,16,16,,
+midnight,icon_load_hover,icon,hover,16,16,,
+midnight,icon_history_hover,icon,hover,16,16,,
+midnight,icon_settings_hover,icon,hover,16,16,,
+midnight,icon_sound_hover,icon,hover,16,16,,
+midnight,icon_mute_hover,icon,hover,16,16,,
+midnight,icon_check_hover,icon,hover,16,16,,
+midnight,icon_home_hover,icon,hover,16,16,,
+midnight,icon_expand_hover,icon,hover,16,16,,
+midnight,icon_heart_hover,icon,hover,16,16,,
+midnight,icon_wave_hover,icon,hover,16,16,,
+midnight,checkbox_off_disabled,checkbox,disabled,18,18,,
+midnight,checkbox_on_disabled,checkbox,disabled,18,18,,
+midnight,icon_next_disabled,icon,disabled,16,16,,
+midnight,icon_back_disabled,icon,disabled,16,16,,
+midnight,icon_up_disabled,icon,disabled,16,16,,
+midnight,icon_down_disabled,icon,disabled,16,16,,
+midnight,icon_play_disabled,icon,disabled,16,16,,
+midnight,icon_pause_disabled,icon,disabled,16,16,,
+midnight,icon_skip_disabled,icon,disabled,16,16,,
+midnight,icon_menu_disabled,icon,disabled,16,16,,
+midnight,icon_close_disabled,icon,disabled,16,16,,
+midnight,icon_save_disabled,icon,disabled,16,16,,
+midnight,icon_load_disabled,icon,disabled,16,16,,
+midnight,icon_history_disabled,icon,disabled,16,16,,
+midnight,icon_settings_disabled,icon,disabled,16,16,,
+midnight,icon_sound_disabled,icon,disabled,16,16,,
+midnight,icon_mute_disabled,icon,disabled,16,16,,
+midnight,icon_check_disabled,icon,disabled,16,16,,
+midnight,icon_home_disabled,icon,disabled,16,16,,
+midnight,icon_expand_disabled,icon,disabled,16,16,,
+midnight,icon_heart_disabled,icon,disabled,16,16,,
+midnight,icon_wave_disabled,icon,disabled,16,16,,
+midnight,continue_0,continue_animation,,12,12,,
+midnight,continue_1,continue_animation,,12,12,,
+midnight,continue_2,continue_animation,,12,12,,
+midnight,slider_thumb_idle,slider,idle,12,20,,
+midnight,slider_track_idle,slider,idle,128,20,4 8 4 8,
+midnight,slider_thumb_hover,slider,hover,12,20,,
+midnight,slider_track_hover,slider,hover,128,20,4 8 4 8,
+midnight,scrollbar_track_idle,scrollbar,idle,8,64,0 4 0 4,
+midnight,scrollbar_thumb_idle,scrollbar,idle,12,32,4 8 4 8,
+midnight,scrollbar_track_hover,scrollbar,hover,8,64,0 4 0 4,
+midnight,scrollbar_thumb_hover,scrollbar,hover,12,32,4 8 4 8,
+midnight,cursor,cursor,,16,16,,

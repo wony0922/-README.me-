@@ -29,12 +29,26 @@ namespace
 	constexpr float PendingCardHeight = 196.0f;
 	constexpr float ScreenMargin = 40.0f;
 
+
+	// Mona 12px pixel font (SIL OFL, /Game/MaterialTraders/UI/Fonts/F_Mona12KR). Sizes snap to multiples of 9 pt (= 12 px grid).
+	FSlateFontInfo AuctionPixelFont(const FSlateFontInfo& Base, int32 Size)
+	{
+		static TWeakObjectPtr<UObject> Cached;
+		if (!Cached.IsValid()) Cached = LoadObject<UObject>(nullptr, TEXT("/Game/MaterialTraders/UI/Fonts/F_Mona12KR.F_Mona12KR"));
+		if (!Cached.IsValid())
+		{
+			FSlateFontInfo Fallback = Base;
+			Fallback.Size = Size;
+			return Fallback;
+		}
+		const int32 Snapped = FMath::Max(9, FMath::RoundToInt(Size / 9.0f) * 9);
+		return FSlateFontInfo(Cached.Get(), Snapped, Snapped >= 27 ? FName(TEXT("Bold")) : FName(TEXT("Regular")));
+	}
+
 	UTextBlock* MakeLabel(UWidgetTree* Tree, int32 Size, const FLinearColor& Color)
 	{
 		UTextBlock* Label = Tree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-		FSlateFontInfo Font = Label->GetFont();
-		Font.Size = Size;
-		Label->SetFont(Font);
+		Label->SetFont(AuctionPixelFont(Label->GetFont(), Size));
 		Label->SetColorAndOpacity(FSlateColor(Color));
 		Label->SetShadowOffset(FVector2D(1.5f, 1.5f));
 		Label->SetShadowColorAndOpacity(FLinearColor(0.0f, 0.0f, 0.0f, 0.9f));
@@ -43,7 +57,49 @@ namespace
 
 	const FLinearColor TextColor(0.98f, 0.95f, 0.86f, 1.0f);
 	const FLinearColor GoldColor(1.0f, 0.78f, 0.25f, 1.0f);
-	const FLinearColor WarnColor(1.0f, 0.55f, 0.35f, 1.0f);
+
+	// Dialogue UI pack (cream theme, 720p export). Text inside cream frames uses dark ink.
+	const FLinearColor InkColor = FLinearColor(FColor(0x61, 0x3D, 0x3B));
+	const FLinearColor InkWarn = FLinearColor(FColor(0xA8, 0x32, 0x28));
+
+	FSlateBrush MakeAuctionDuiBrush(const TCHAR* Name, float NativeW, float NativeH, float L, float T, float R, float B, float PixelScale = 2.0f)
+	{
+		FSlateBrush Brush;
+		if (UTexture2D* Texture = LoadObject<UTexture2D>(nullptr, *FString::Printf(TEXT("/Game/MaterialTraders/UI/Dialogue/T_DUI_%s.T_DUI_%s"), Name, Name)))
+			Brush.SetResourceObject(Texture);
+		Brush.ImageSize = FVector2D(NativeW * PixelScale, NativeH * PixelScale);
+		Brush.DrawAs = ESlateBrushDrawType::Box;
+		Brush.Margin = FMargin(L / NativeW, T / NativeH, R / NativeW, B / NativeH);
+		return Brush;
+	}
+
+	/** Puts Label inside a cream frame and adds the frame to the canvas; the frame follows the label's visibility (see SyncFrame). */
+	UCanvasPanelSlot* AddFramed(UWidgetTree* Tree, UCanvasPanel* Canvas, UTextBlock* Label, const FSlateBrush& Brush, const FMargin& Padding)
+	{
+		UBorder* Frame = Tree->ConstructWidget<UBorder>(UBorder::StaticClass());
+		Frame->SetBrush(Brush);
+		Frame->SetPadding(Padding);
+		Frame->SetHorizontalAlignment(HAlign_Center);
+		Frame->SetVerticalAlignment(VAlign_Center);
+		Frame->SetContent(Label);
+		Frame->SetVisibility(Label->GetVisibility());
+		Label->SetShadowColorAndOpacity(FLinearColor::Transparent);
+		return Canvas->AddChildToCanvas(Frame);
+	}
+
+	void SyncFrame(UTextBlock* Label)
+	{
+		if (!Label) return;
+		if (UBorder* Frame = Cast<UBorder>(Label->GetParent()))
+		{
+			const ESlateVisibility Wanted = Label->GetVisibility() == ESlateVisibility::Collapsed ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible;
+			if (Frame->GetVisibility() != Wanted) Frame->SetVisibility(Wanted);
+		}
+	}
+
+	FSlateBrush NotificationBrush() { return MakeAuctionDuiBrush(TEXT("Notification"), 224, 32, 12, 8, 16, 8); }
+	FSlateBrush TooltipBrush() { return MakeAuctionDuiBrush(TEXT("Tooltip"), 160, 32, 12, 8, 16, 8); }
+	FSlateBrush ModalBrush() { return MakeAuctionDuiBrush(TEXT("Modal"), 320, 144, 12, 8, 16, 8); }
 }
 
 void UOreDealAuctionHudWidget::NativeOnInitialized()
@@ -67,9 +123,9 @@ void UOreDealAuctionHudWidget::BuildRoot()
 	RootCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("OreDealAuctionRoot"));
 	WidgetTree->RootWidget = RootCanvas;
 
-	StatusText = MakeLabel(WidgetTree, 20, TextColor);
+	StatusText = MakeLabel(WidgetTree, 19, InkColor);
 	StatusText->SetJustification(ETextJustify::Center);
-	if (UCanvasPanelSlot* StatusSlot = RootCanvas->AddChildToCanvas(StatusText))
+	if (UCanvasPanelSlot* StatusSlot = AddFramed(WidgetTree, RootCanvas, StatusText, NotificationBrush(), FMargin(26.0f, 8.0f, 32.0f, 10.0f)))
 	{
 		StatusSlot->SetAnchors(FAnchors(0.5f, 0.0f));
 		StatusSlot->SetAlignment(FVector2D(0.5f, 0.0f));
@@ -78,10 +134,10 @@ void UOreDealAuctionHudWidget::BuildRoot()
 		StatusSlot->SetZOrder(10);
 	}
 
-	FlashText = MakeLabel(WidgetTree, 26, WarnColor);
+	FlashText = MakeLabel(WidgetTree, 24, InkWarn);
 	FlashText->SetJustification(ETextJustify::Center);
 	FlashText->SetVisibility(ESlateVisibility::Collapsed);
-	if (UCanvasPanelSlot* FlashSlot = RootCanvas->AddChildToCanvas(FlashText))
+	if (UCanvasPanelSlot* FlashSlot = AddFramed(WidgetTree, RootCanvas, FlashText, ModalBrush(), FMargin(36.0f, 20.0f, 40.0f, 22.0f)))
 	{
 		FlashSlot->SetAnchors(FAnchors(0.5f, 0.5f));
 		FlashSlot->SetAlignment(FVector2D(0.5f, 0.5f));
@@ -90,10 +146,10 @@ void UOreDealAuctionHudWidget::BuildRoot()
 		FlashSlot->SetZOrder(20);
 	}
 
-	PickerHintText = MakeLabel(WidgetTree, 17, GoldColor);
+	PickerHintText = MakeLabel(WidgetTree, 16, InkColor);
 	PickerHintText->SetJustification(ETextJustify::Center);
 	PickerHintText->SetVisibility(ESlateVisibility::Collapsed);
-	if (UCanvasPanelSlot* HintSlot = RootCanvas->AddChildToCanvas(PickerHintText))
+	if (UCanvasPanelSlot* HintSlot = AddFramed(WidgetTree, RootCanvas, PickerHintText, TooltipBrush(), FMargin(24.0f, 7.0f, 30.0f, 9.0f)))
 	{
 		HintSlot->SetAnchors(FAnchors(0.5f, 1.0f));
 		HintSlot->SetAlignment(FVector2D(0.5f, 1.0f));
@@ -113,10 +169,10 @@ void UOreDealAuctionHudWidget::BuildRoot()
 		CardSlot->SetZOrder(10);
 	}
 
-	PendingText = MakeLabel(WidgetTree, 16, TextColor);
+	PendingText = MakeLabel(WidgetTree, 15, InkColor);
 	PendingText->SetJustification(ETextJustify::Right);
 	PendingText->SetVisibility(ESlateVisibility::Collapsed);
-	if (UCanvasPanelSlot* TextSlot = RootCanvas->AddChildToCanvas(PendingText))
+	if (UCanvasPanelSlot* TextSlot = AddFramed(WidgetTree, RootCanvas, PendingText, NotificationBrush(), FMargin(24.0f, 10.0f, 30.0f, 12.0f)))
 	{
 		TextSlot->SetAnchors(FAnchors(1.0f, 1.0f));
 		TextSlot->SetAlignment(FVector2D(1.0f, 1.0f));
@@ -227,6 +283,9 @@ void UOreDealAuctionHudWidget::ApplyState(const FOreDealAuctionHudState& State)
 			PendingText->SetText(FText::FromString(FString::Printf(TEXT("가져온 카드  %d장 남음\n%s\n%s"), State.PendingCards.Num(), *WagonLine, *Controls)));
 		}
 	}
+	SyncFrame(StatusText);
+	SyncFrame(PickerHintText);
+	SyncFrame(PendingText);
 }
 
 void UOreDealAuctionHudWidget::Flash(const FString& Message, float Seconds)
@@ -234,6 +293,7 @@ void UOreDealAuctionHudWidget::Flash(const FString& Message, float Seconds)
 	if (!FlashText) return;
 	FlashText->SetText(FText::FromString(Message));
 	FlashText->SetVisibility(ESlateVisibility::HitTestInvisible);
+	SyncFrame(FlashText);
 	FlashRemaining = Seconds;
 }
 
@@ -243,6 +303,10 @@ void UOreDealAuctionHudWidget::NativeTick(const FGeometry& MyGeometry, float InD
 	if (FlashRemaining > 0.0f)
 	{
 		FlashRemaining -= InDeltaTime;
-		if (FlashRemaining <= 0.0f && FlashText) FlashText->SetVisibility(ESlateVisibility::Collapsed);
+		if (FlashRemaining <= 0.0f && FlashText)
+		{
+			FlashText->SetVisibility(ESlateVisibility::Collapsed);
+			SyncFrame(FlashText);
+		}
 	}
 }

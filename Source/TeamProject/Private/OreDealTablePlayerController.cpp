@@ -30,7 +30,7 @@
 
 namespace
 {
-	const TCHAR* ResourceNames[] = { TEXT("Wood"), TEXT("Coal"), TEXT("Copper"), TEXT("Iron"), TEXT("Silver"), TEXT("Gold"), TEXT("Diamond"), TEXT("Adamantium") };
+	const TCHAR* ControllerResourceNames[] = { TEXT("Wood"), TEXT("Coal"), TEXT("Copper"), TEXT("Iron"), TEXT("Silver"), TEXT("Gold"), TEXT("Diamond"), TEXT("Adamantium") };
 
 	int32 SaleReward(int32 Resource, int32 Count)
 	{
@@ -42,7 +42,7 @@ namespace
 			{1, 2, 3, 4}, {1, 2, 3, 4}, {1, 2, 3, 4}, {1, 2, 3, 4},
 			{1, 2, 3, 4}, {1, 2, 3, 4}, {1, 2, 3, 4}, {2, 3, 0, 0}
 		};
-		if (Resource < 0 || Resource >= UE_ARRAY_COUNT(ResourceNames)) return 0;
+		if (Resource < 0 || Resource >= UE_ARRAY_COUNT(ControllerResourceNames)) return 0;
 		int32 Reward = 0;
 		for (int32 I = 0; I < 4 && Thresholds[Resource][I] > 0; ++I)
 			if (Count >= Thresholds[Resource][I]) Reward = Rewards[Resource][I];
@@ -546,7 +546,7 @@ void AOreDealTablePlayerController::GetStoreWagons(TArray<FOreDealStoreWagonView
 		FOreDealStoreWagonView& View = OutWagons.AddDefaulted_GetRef();
 		const int32 Resource = TypesInner->GetPropertyValue(Types.GetRawPtr(Index));
 		const int32 Count = CountsInner->GetPropertyValue(Counts.GetRawPtr(Index));
-		if (Resource < 0 || Resource >= UE_ARRAY_COUNT(ResourceNames) || Count <= 0) continue;
+		if (Resource < 0 || Resource >= UE_ARRAY_COUNT(ControllerResourceNames) || Count <= 0) continue;
 		View.Resource = Resource;
 		View.Count = Count;
 		View.Reward = SaleReward(Resource, Count);
@@ -677,14 +677,14 @@ void AOreDealTablePlayerController::GetSaleOptionText(int32 WagonIndex, FString&
 	if (!Types.IsValidIndex(WagonIndex) || !Counts.IsValidIndex(WagonIndex)) return;
 	const int32 Resource = TypesInner->GetPropertyValue(Types.GetRawPtr(WagonIndex));
 	const int32 Count = CountsInner->GetPropertyValue(Counts.GetRawPtr(WagonIndex));
-	if (Resource < 0 || Resource >= UE_ARRAY_COUNT(ResourceNames) || Count <= 0)
+	if (Resource < 0 || Resource >= UE_ARRAY_COUNT(ControllerResourceNames) || Count <= 0)
 	{
 		OutText = FString::Printf(TEXT("마차 %d: 비어 있음"), WagonIndex + 1);
 		return;
 	}
 	const int32 Reward = SaleReward(Resource, Count);
 	bOutCanSell = Count >= 2 || CanSellSingleCardSlot(Counts, CountsInner, WagonIndex);
-	OutText = FString::Printf(TEXT("마차 %d · %s X %d개 · 보상 %dG%s"), WagonIndex + 1, ResourceNames[Resource], Count, Reward, Reward == 0 ? TEXT(" (0G 정산 가능)") : TEXT(""));
+	OutText = FString::Printf(TEXT("마차 %d · %s X %d개 · 보상 %dG%s"), WagonIndex + 1, ControllerResourceNames[Resource], Count, Reward, Reward == 0 ? TEXT(" (0G 정산 가능)") : TEXT(""));
 }
 
 void AOreDealTablePlayerController::RequestSellWagon(int32 WagonIndex)
@@ -751,7 +751,7 @@ void AOreDealTablePlayerController::ServerSellWagon_Implementation(int32 WagonIn
 	if (!Types.IsValidIndex(WagonIndex) || !Counts.IsValidIndex(WagonIndex)) return;
 	const int32 Resource = TypesInner->GetPropertyValue(Types.GetRawPtr(WagonIndex));
 	const int32 Count = CountsInner->GetPropertyValue(Counts.GetRawPtr(WagonIndex));
-	if (Resource < 0 || Resource >= UE_ARRAY_COUNT(ResourceNames) || Count <= 0) return;
+	if (Resource < 0 || Resource >= UE_ARRAY_COUNT(ControllerResourceNames) || Count <= 0) return;
 	if (Count < 2 && !CanSellSingleCardSlot(Counts, CountsInner, WagonIndex)) return;
 	const int32 Reward = SaleReward(Resource, Count);
 	TypesInner->SetPropertyValue(Types.GetRawPtr(WagonIndex), INDEX_NONE);
@@ -763,7 +763,7 @@ void AOreDealTablePlayerController::ServerSellWagon_Implementation(int32 WagonIn
 	if (UWorld* World = GetWorld())
 		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 			if (AOreDealTablePlayerController* OtherPC = Cast<AOreDealTablePlayerController>(It->Get()))
-				OtherPC->ClientShowSaleToast(ResourceNames[Resource], Count);
+				OtherPC->ClientShowSaleToast(ControllerResourceNames[Resource], Count);
 }
 
 void AOreDealTablePlayerController::ServerRecordMandatoryHandPlacement_Implementation(AActor* CardDeck, APlayerState* PlacingPlayer)

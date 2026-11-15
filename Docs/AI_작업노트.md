@@ -1,7 +1,7 @@
 # AI 작업노트 — Ore Deal (TeamProject)
 
 > 새 대화에서 Claude에게: "Docs/AI_작업노트.md 읽고 이어서 하자" 라고 하면 됩니다.
-> 마지막 갱신: 2026-11-15 (11장 상점 추가)
+> 마지막 갱신: 2026-11-15 (12장 대화창 UI 에셋 적용)
 
 ## 용어 (2026-11-14 사용자 정의, 구현·수정 설명에 이 이름만 사용)
 | 용어 | 뜻 | 코드상 저장 위치 |
@@ -256,3 +256,35 @@
 8. 사용자에게 물어볼 것: 1장 마차 판매 조건(11-6)을 README대로 바꿀지.
 
 **참고**: 이 임시 저장 시점에 에디터는 3인 PIE 실행 중(확인 1번 진행 중이었음, 게임 시작됨·각자 골드 120·마차에 테스트용 카드 5장). 확인이 끝나면 PIE 정지. PIE 중에는 BP 컴파일 금지.
+
+## 12. 2026-11-15 대화창 UI 에셋 적용 (Everyday Life Pixel Dialogue UI, Cream)
+- 원본 팩: `Downloads\Asset-...\Asset\UI\Dialogue_UI` (Cream/Sunset/Midnight 3색, 640x360 기준 픽셀아트, 9-슬라이스 값은 `ASSET_CATALOG.csv`). 살롱·상점 양피지 톤에 맞춰 **Cream** 선택. 팩에 LICENSE.txt가 없었음 → 사용 조건은 구매처에서 확인 필요.
+- 사용 파일: Cream **720p(2배)** PNG 15장 → `SourceArt/UI/Dialogue/T_DUI_*.png`(+README, CATALOG) → `/Game/MaterialTraders/UI/Dialogue/T_DUI_*` (MenuPanel, Notification, Modal, Tooltip, Nameplate, Button/SmallButton Idle·Hover·Pressed, ScrollThumb/Track, SliderThumb/Track). 텍스처 설정: Nearest, 밉맵 없음, UI 그룹, TC_EditorIcon, NeverStream.
+- 브러시 규칙: Box, `Margin = 카탈로그 inset / 원본 크기`, `ImageSize = 원본 크기 x 2`(작은 버튼·스크롤바·입력창은 x1). 크림 위 글자색 = 진갈색 #613D3B, 강조 #B56C4C, 경고 #A83228. 외곽선·그림자 끔.
+- C++ (`cpp`만 수정, 헤더 그대로)
+  - `OreDealInteractionWidget.cpp`: 대화창 = MenuPanel(투명도 설정은 틴트 알파), 스크롤바 = ScrollThumb/Track, 채팅 입력 = Tooltip, 버튼(`MakeButton`) = Button(글자 16 이하면 SmallButton), 판매 토스트 = Notification. 대화창 접힘 높이 112→132, 상점 버튼 (20,160) 220x56으로 내려서 겹침 해결, 대화창 ZOrder 5(펼치면 버튼 위). 폰트에 없는 이모지 제거(⚙→"설정", 🤠 제거).
+  - `OreDealAuctionHudWidget.cpp`: 상단 안내 = Notification, 경고(Flash) = Modal, 손패 선택 힌트 = Tooltip, 가져온 카드 문구 = Notification. 글자를 `AddFramed`로 UBorder에 감싸고 `SyncFrame`으로 글자 보임 여부를 프레임에 맞춤.
+- 블루프린트 (툴로 수정·컴파일·저장): `WBP_HUD` 나무/골드 패널 = Notification, 시작 패널 = Modal, 글자색 변경. `WBP_Result` 패널 = MenuPanel, 버튼 2개 = Button Idle/Hover/Pressed. TxtTurn/TxtPhase(장면 위 외곽선 글자)는 그대로.
+- **빌드 주의 (unity 충돌)**: cpp를 고치면 Adaptive Build가 그 파일을 unity에서 빼면서 묶음이 바뀌어 `OreDealMarketBroker.cpp`와 `OreDealTablePlayerController.cpp`의 익명 네임스페이스 `ResourceNames`가 충돌(C2374) → 컨트롤러 쪽을 `ControllerResourceNames`로 이름 변경. Live Coding 실패 시 오류는 콘솔 창에만 나오므로 Blender Python으로 `Build.bat` 전체 빌드(에디터 종료 후)를 돌려 로그(`Saved/Logs/DialogueUIBuild.log`)로 확인.
+- 확인: 2인 PIE에서 대화창·설정·상점 버튼, 시작 패널, 나무/골드, 경매 상단 안내 표시 확인. 결과 화면·토스트·경고 문구·채팅 입력창은 화면으로 아직 확인 안 함.
+- (12-3에서 해결) `WBP_HUD.TxtPhase` 슬롯이 (pos -500, size 500)이라 화면 왼쪽 절반에 치우쳐 대화창과 겹치고, 클라에서는 "[1단계: 필수 매립]"이 갱신되지 않은 채 남아 있음(기존 문제). 메인메뉴(`WBP_MainMenu`) 버튼은 아직 기존 스타일.
+
+### 12-1. 픽셀 폰트 (Mona12 KR)
+- 폰트: Mona (Monad ABXY, SIL OFL 1.1). `Mona12TextKR.ttf` / `-Bold.ttf` → `SourceArt/Fonts/Mona/`(라이선스 `LICENSE_mona_OFL.txt` 포함) → `/Game/MaterialTraders/UI/Fonts/FF_Mona12KR(_Bold)`(FontFace, 힌팅 Monochrome, 로딩 Inline) + Font 에셋 `F_Mona12KR`(Regular/Bold, 런타임 캐시).
+- 크기 규칙: 12px 격자라 **9pt 배수**(9/18/27/36/45)로 맞춤, 27 이상은 Bold. C++ 각 파일에 `InteractionPixelFont` / `AuctionPixelFont` / `StorePixelFont`(이름이 같으면 unity 빌드 충돌하므로 파일마다 다르게)로 `MakeLabel`/`AddText`에 적용. BP는 `WBP_HUD`, `WBP_Result` 글자 12개 Font를 툴로 교체.
+- 같은 이유로 경매 HUD의 브러시 함수는 `MakeAuctionDuiBrush`로 이름 변경(대화창 쪽 `MakeDuiBrush`와 겹치지 않게).
+- 주의: device_commit_files는 같은 stagedPath로 다시 올리면 이전 내용이 들어갈 수 있음 → 수정본은 새 파일 이름으로 올리고 디스크 md5로 확인.
+- 확인: PIE에서 대화창·설정·상점 버튼, 시작 패널, 턴 문구, 상점 창 글자 모두 Mona로 표시.
+
+### 12-2. 메인메뉴 (같은 날)
+- `WBP_MainMenu`: 버튼 5개(방 만들기/방 참가/종료/새로고침/뒤로) = Button Idle/Hover/Pressed(2배), 방 목록 패널 `RoomPanel` = MenuPanel, `RoomList` 스크롤바 = ScrollThumb/Track. 글자 전부 Mona(9pt 배수), 진갈색(상태 문구는 강조색), 외곽선 끔.
+- `WBP_RoomEntry`(방 목록 한 줄): 버튼 = Button 스타일, 글자 Mona 27.
+- 확인: PIE 첫 화면 버튼 3개, 방 목록 패널(빈 목록) 확인. 방이 있을 때의 목록 한 줄(`WBP_RoomEntry`)은 화면으로는 아직 못 봄.
+
+### 12-3. HUD 겹침 정리 / 상점 버튼 대기 중 숨김 (같은 날)
+- 상점 버튼: `OreDealInteractionWidget`에서 버튼 이름을 `StoreButton`으로 지정 → `OreDealPreGameComponent`의 대기 중 숨김 목록(`WaitingHiddenHudWidgets`)에 `StoreButton`, `TurnFrame` 추가, 대상 위젯에 `OreDealInteractionWidget` 클래스도 포함. 방에 들어와 게임 시작 전에는 상점 버튼·키 가이드가 안 보임.
+- 단계 글자 `WBP_HUD.TxtPhase`: BP 그래프가 참조할 수 있어 위젯은 남기고 Visibility Collapsed + RenderOpacity 0으로 화면에서 제거.
+- 키 가이드 `WBP_HUD.TxtTurn`: Border `TurnFrame`(Notification 프레임)으로 감싸 재화 UI 바로 아래(우상단 앵커, (-24,100))로 이동. Mona 18, 진갈색, 오른쪽 정렬, 380px에서 줄바꿈.
+- 내 턴 문구(`OreDealTurnBridge::GetTurnStageLabel`)를 2줄 요약으로 줄임: "▶ 내 턴 (1/4 매립) / A/D 마차 · Space 배치 · E 확정" 등. 다른 플레이어 턴 문구("다른 플레이어의 턴 · 시야 회전 / 이모트(휠 클릭)만 가능")는 BP 그래프 안의 글자라 그대로(줄바꿈으로 2줄 표시).
+- **Live Coding 주의**: 이번에 `OreDealPreGameComponent` 변경(익명 네임스페이스 배열)이 Live Coding으로는 반영되지 않았음 → 전체 빌드 후 반영 확인. 상수 배열/새 이름 같은 변경은 전체 빌드로.
+- 확인: PIE 대기 중 상점 버튼·TurnFrame Collapsed, 시작 후 표시. 내 턴/상대 턴 화면 모두 대화창과 겹침 없음.

@@ -12,6 +12,21 @@
 
 namespace
 {
+	// Mona 12px pixel font (SIL OFL, /Game/MaterialTraders/UI/Fonts/F_Mona12KR). Sizes snap to multiples of 9 pt (= 12 px grid).
+	FSlateFontInfo StorePixelFont(const FSlateFontInfo& Base, int32 Size)
+	{
+		static TWeakObjectPtr<UObject> Cached;
+		if (!Cached.IsValid()) Cached = LoadObject<UObject>(nullptr, TEXT("/Game/MaterialTraders/UI/Fonts/F_Mona12KR.F_Mona12KR"));
+		if (!Cached.IsValid())
+		{
+			FSlateFontInfo Fallback = Base;
+			Fallback.Size = Size;
+			return Fallback;
+		}
+		const int32 Snapped = FMath::Max(9, FMath::RoundToInt(Size / 9.0f) * 9);
+		return FSlateFontInfo(Cached.Get(), Snapped, Snapped >= 27 ? FName(TEXT("Bold")) : FName(TEXT("Regular")));
+	}
+
 	// ---- Layout, in panel units. The panel is the STORE mock-up at half its pixel size (1141 x 841).
 	constexpr float PanelW = 1141.0f;
 	constexpr float PanelH = 841.0f;
@@ -153,9 +168,7 @@ UImage* UOreDealStoreWidget::AddImage(UCanvasPanel* Parent, UTexture2D* Texture,
 UTextBlock* UOreDealStoreWidget::AddText(UCanvasPanel* Parent, int32 FontSize, const FLinearColor& Color, float X, float Y, const FVector2D& Alignment, int32 ZOrder)
 {
 	UTextBlock* Label = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-	FSlateFontInfo Font = Label->GetFont();
-	Font.Size = FontSize;
-	Label->SetFont(Font);
+	Label->SetFont(StorePixelFont(Label->GetFont(), FontSize));
 	Label->SetColorAndOpacity(FSlateColor(Color));
 	Label->SetJustification(Alignment.X > 0.75f ? ETextJustify::Right : (Alignment.X > 0.25f ? ETextJustify::Center : ETextJustify::Left));
 	Label->SetVisibility(ESlateVisibility::HitTestInvisible);

@@ -157,10 +157,11 @@ FText UOreDealTurnBridge::GetTurnStageLabel(AActor* CardDeck)
 
 	switch (PhaseProperty->GetPropertyValue_InContainer(CardDeck))
 	{
-	case 0: return FText::FromString(TEXT("▶ 내 턴   ·   1/4 광산 매립 (맨 앞 1장 필수, 이후 추가 등록 자유)   ·   E : 단계 확정"));
-	case 1: return FText::FromString(TEXT("▶ 내 턴   ·   2/4 경매 거래"));
-	case 2: return FText::FromString(TEXT("▶ 내 턴   ·   3/4 가져온 자원 배치 (전원 완료 시 자동 진행)"));
-	case 3: return FText::FromString(TEXT("▶ 내 턴   ·   4/4 보급 수령   ·   E : 턴 종료"));
-	default: return FText::FromString(TEXT("▶ 내 턴   ·   E : 단계 진행"));
+	// Short two-line key guide shown under the wood/gold bar (WBP_HUD TxtTurn).
+	case 0: return FText::FromString(TEXT("▶ 내 턴 (1/4 매립)\nA/D 마차 · Space 배치 · E 확정"));
+	case 1: return FText::FromString(TEXT("▶ 내 턴 (2/4 경매)\nA/D 이동 · C 선택 · Space 결정"));
+	case 2: return FText::FromString(TEXT("▶ 내 턴 (3/4 배치)\nA/D 마차 · Space 배치"));
+	case 3: return FText::FromString(TEXT("▶ 내 턴 (4/4 보급)\nW 드로우 · E 턴 종료"));
+	default: return FText::FromString(TEXT("▶ 내 턴\nE 단계 진행"));
 	}
 }

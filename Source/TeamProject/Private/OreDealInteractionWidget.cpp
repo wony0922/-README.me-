@@ -14,6 +14,7 @@
 #include "Components/VerticalBox.h"
 #include "Components/Widget.h"
 #include "Blueprint/WidgetTree.h"
+#include "Engine/Texture2D.h"
 #include "Rendering/DrawElements.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
@@ -29,35 +30,98 @@ namespace
 		return Resource >= 0 && Resource < UE_ARRAY_COUNT(MarketResourceNames) ? FString(MarketResourceNames[Resource]) : TEXT("Unknown");
 	}
 
+
+	// Mona 12px pixel font (SIL OFL, /Game/MaterialTraders/UI/Fonts/F_Mona12KR). Sizes snap to multiples of 9 pt (= 12 px grid).
+	FSlateFontInfo InteractionPixelFont(const FSlateFontInfo& Base, int32 Size)
+	{
+		static TWeakObjectPtr<UObject> Cached;
+		if (!Cached.IsValid()) Cached = LoadObject<UObject>(nullptr, TEXT("/Game/MaterialTraders/UI/Fonts/F_Mona12KR.F_Mona12KR"));
+		if (!Cached.IsValid())
+		{
+			FSlateFontInfo Fallback = Base;
+			Fallback.Size = Size;
+			return Fallback;
+		}
+		const int32 Snapped = FMath::Max(9, FMath::RoundToInt(Size / 9.0f) * 9);
+		return FSlateFontInfo(Cached.Get(), Snapped, Snapped >= 27 ? FName(TEXT("Bold")) : FName(TEXT("Regular")));
+	}
+
 	UTextBlock* MakeLabel(UWidgetTree* Tree, const FString& Text, int32 Size = 18)
 	{
 		UTextBlock* Label = Tree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 		Label->SetText(FText::FromString(Text));
-		FSlateFontInfo Font = Label->GetFont();
-		Font.Size = Size;
-		Label->SetFont(Font);
+		Label->SetFont(InteractionPixelFont(Label->GetFont(), Size));
 		Label->SetColorAndOpacity(FSlateColor(FLinearColor(0.96f, 0.93f, 0.84f, 1.0f)));
 		return Label;
+	}
+
+	// ---- Dialogue UI pack (Everyday Life, cream theme, 720p export = 2x native pixels) ----
+	// Textures: /Game/MaterialTraders/UI/Dialogue/T_DUI_* (Nearest filter, no mips).
+	// Nine-slice insets come from the pack's ASSET_CATALOG.csv, in native pixels.
+	const FLinearColor DuiInk = FLinearColor(FColor(0x61, 0x3D, 0x3B)); // dark brown text on cream
+
+	UTexture2D* LoadDuiTexture(const TCHAR* Name)
+	{
+		return LoadObject<UTexture2D>(nullptr, *FString::Printf(TEXT("/Game/MaterialTraders/UI/Dialogue/T_DUI_%s.T_DUI_%s"), Name, Name));
+	}
+
+	/** Box brush; PixelScale = on-screen size of one native pack pixel (2 = the 720p export's own size). */
+	FSlateBrush MakeDuiBrush(const TCHAR* Name, float NativeW, float NativeH, float L, float T, float R, float B, float PixelScale = 2.0f)
+	{
+		FSlateBrush Brush;
+		if (UTexture2D* Texture = LoadDuiTexture(Name)) Brush.SetResourceObject(Texture);
+		Brush.ImageSize = FVector2D(NativeW * PixelScale, NativeH * PixelScale);
+		Brush.DrawAs = (L + T + R + B) > 0.0f ? ESlateBrushDrawType::Box : ESlateBrushDrawType::Image;
+		Brush.Margin = FMargin(L / NativeW, T / NativeH, R / NativeW, B / NativeH);
+		return Brush;
+	}
+
+	FSlateBrush DuiPanelBrush() { return MakeDuiBrush(TEXT("MenuPanel"), 288, 220, 12, 8, 16, 8); }
+	FSlateBrush DuiNotificationBrush() { return MakeDuiBrush(TEXT("Notification"), 224, 32, 12, 8, 16, 8); }
+	FSlateBrush DuiTooltipBrush() { return MakeDuiBrush(TEXT("Tooltip"), 160, 32, 12, 8, 16, 8, 1.0f); }
+
+	FScrollBarStyle DuiScrollBarStyle()
+	{
+		FScrollBarStyle Style;
+		const FSlateBrush Track = MakeDuiBrush(TEXT("ScrollTrack"), 8, 64, 0, 4, 0, 4, 1.0f);
+		const FSlateBrush Thumb = MakeDuiBrush(TEXT("ScrollThumb"), 12, 32, 4, 8, 4, 8, 1.0f);
+		FSlateBrush None;
+		None.DrawAs = ESlateBrushDrawType::NoDrawType;
+		Style.SetVerticalBackgroundImage(Track);
+		Style.SetVerticalTopSlotImage(None);
+		Style.SetVerticalBottomSlotImage(None);
+		Style.SetNormalThumbImage(Thumb);
+		Style.SetHoveredThumbImage(Thumb);
+		Style.SetDraggedThumbImage(Thumb);
+		return Style;
+	}
+
+	FButtonStyle DuiButtonStyle(bool bSmall)
+	{
+		const float Scale = bSmall ? 1.0f : 2.0f;
+		const TCHAR* Idle = bSmall ? TEXT("SmallButtonIdle") : TEXT("ButtonIdle");
+		const TCHAR* Hover = bSmall ? TEXT("SmallButtonHover") : TEXT("ButtonHover");
+		const TCHAR* Pressed = bSmall ? TEXT("SmallButtonPressed") : TEXT("ButtonPressed");
+		const float W = bSmall ? 64.0f : 144.0f;
+		FButtonStyle Style;
+		Style.SetNormal(MakeDuiBrush(Idle, W, 32, 20, 14, 16, 10, Scale));
+		Style.SetHovered(MakeDuiBrush(Hover, W, 32, 20, 14, 16, 10, Scale));
+		Style.SetPressed(MakeDuiBrush(Pressed, W, 32, 20, 14, 16, 10, Scale));
+		const float PadX = bSmall ? 6.0f : 18.0f;
+		Style.SetNormalPadding(FMargin(PadX, 2.0f, PadX, 4.0f));
+		Style.SetPressedPadding(FMargin(PadX, 4.0f, PadX, 2.0f));
+		return Style;
 	}
 
 	UButton* MakeButton(UWidgetTree* Tree, const FString& Text, int32 Size = 17)
 	{
 		UButton* Button = Tree->ConstructWidget<UButton>(UButton::StaticClass());
-	FSlateBrush NormalBrush;
-	NormalBrush.DrawAs = ESlateBrushDrawType::Box;
-	NormalBrush.TintColor = FSlateColor(FLinearColor(0.18f, 0.13f, 0.09f, 0.98f));
-	NormalBrush.Margin = FMargin(0.08f);
-	FSlateBrush HoveredBrush = NormalBrush;
-	HoveredBrush.TintColor = FSlateColor(FLinearColor(0.32f, 0.22f, 0.12f, 1.0f));
-	FSlateBrush PressedBrush = NormalBrush;
-	PressedBrush.TintColor = FSlateColor(FLinearColor(0.42f, 0.27f, 0.12f, 1.0f));
-	FButtonStyle Style;
-	Style.SetNormal(NormalBrush);
-	Style.SetHovered(HoveredBrush);
-	Style.SetPressed(PressedBrush);
-	Button->SetStyle(Style);
-	Button->SetBackgroundColor(FLinearColor::White);
-		Button->AddChild(MakeLabel(Tree, Text, Size));
+		Button->SetStyle(DuiButtonStyle(Size <= 16));
+		Button->SetBackgroundColor(FLinearColor::White);
+		UTextBlock* Label = MakeLabel(Tree, Text, Size);
+		Label->SetColorAndOpacity(FSlateColor(DuiInk));
+		Label->SetJustification(ETextJustify::Center);
+		Button->AddChild(Label);
 		return Button;
 	}
 
@@ -170,15 +234,26 @@ void UOreDealInteractionWidget::BuildInterface()
 	DrawPromptText->SetVisibility(ESlateVisibility::Collapsed);
 
 	ChatPanel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("ChatPanel"));
-	ChatPanel->SetBrushColor(FLinearColor(0.025f, 0.02f, 0.018f, ChatOpacity));
+	ChatPanel->SetBrush(DuiPanelBrush());
+	ChatPanel->SetBrushColor(FLinearColor(1.0f, 1.0f, 1.0f, ChatOpacity));
+	ChatPanel->SetPadding(FMargin(20.0f, 10.0f, 22.0f, 12.0f));
 	UVerticalBox* ChatBody = WidgetTree->ConstructWidget<UVerticalBox>();
 	UHorizontalBox* ChatHeader = WidgetTree->ConstructWidget<UHorizontalBox>();
-	ChatHeader->AddChildToHorizontalBox(MakeLabel(WidgetTree, TEXT("대화"), 20));
-	UButton* SettingsButton = MakeButton(WidgetTree, TEXT("⚙"), 16);
+	UTextBlock* ChatTitle = MakeLabel(WidgetTree, TEXT("대화"), 18);
+	ChatTitle->SetColorAndOpacity(FSlateColor(DuiInk));
+	if (UHorizontalBoxSlot* TitleSlot = ChatHeader->AddChildToHorizontalBox(ChatTitle))
+	{
+		TitleSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		TitleSlot->SetVerticalAlignment(VAlign_Center);
+	}
+	UButton* SettingsButton = MakeButton(WidgetTree, TEXT("설정"), 13);
 	SettingsButton->OnClicked.AddDynamic(this, &UOreDealInteractionWidget::OnSettingsClicked);
-	ChatHeader->AddChildToHorizontalBox(SettingsButton);
+	if (UHorizontalBoxSlot* SettingsSlot = ChatHeader->AddChildToHorizontalBox(SettingsButton))
+		SettingsSlot->SetVerticalAlignment(VAlign_Center);
 	ChatBody->AddChildToVerticalBox(ChatHeader);
 	ChatScroll = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("ChatScroll"));
+	ChatScroll->SetWidgetBarStyle(DuiScrollBarStyle());
+	ChatScroll->SetScrollbarThickness(FVector2D(10.0f, 10.0f));
 	ChatScroll->SetAlwaysShowScrollbar(true);
 	ChatScroll->SetScrollBarVisibility(ESlateVisibility::Visible);
 	USizeBox* ChatScrollSize = WidgetTree->ConstructWidget<USizeBox>();
@@ -187,13 +262,21 @@ void UOreDealInteractionWidget::BuildInterface()
 	ChatBody->AddChildToVerticalBox(ChatScrollSize);
 
 	UVerticalBox* SettingsPanel = WidgetTree->ConstructWidget<UVerticalBox>();
-	SettingsPanel->AddChildToVerticalBox(MakeLabel(WidgetTree, TEXT("창 투명도"), 14));
+	UTextBlock* OpacityLabel = MakeLabel(WidgetTree, TEXT("창 투명도"), 14);
+	OpacityLabel->SetColorAndOpacity(FSlateColor(DuiInk));
+	SettingsPanel->AddChildToVerticalBox(OpacityLabel);
 	OpacitySlider = WidgetTree->ConstructWidget<USlider>(USlider::StaticClass());
 	OpacitySlider->SetMinValue(0.3f); OpacitySlider->SetMaxValue(1.0f);
+	OpacitySlider->SetSliderBarColor(DuiInk);
+	OpacitySlider->SetSliderHandleColor(FLinearColor(FColor(0xB5, 0x6C, 0x4C)));
 	OpacitySlider->OnValueChanged.AddDynamic(this, &UOreDealInteractionWidget::OnOpacityChanged);
 	SettingsPanel->AddChildToVerticalBox(OpacitySlider);
-	SettingsPanel->AddChildToVerticalBox(MakeLabel(WidgetTree, TEXT("창 크기"), 14));
+	UTextBlock* ScaleLabel = MakeLabel(WidgetTree, TEXT("창 크기"), 14);
+	ScaleLabel->SetColorAndOpacity(FSlateColor(DuiInk));
+	SettingsPanel->AddChildToVerticalBox(ScaleLabel);
 	ScaleSlider = WidgetTree->ConstructWidget<USlider>(USlider::StaticClass());
+	ScaleSlider->SetSliderBarColor(DuiInk);
+	ScaleSlider->SetSliderHandleColor(FLinearColor(FColor(0xB5, 0x6C, 0x4C)));
 	ScaleSlider->SetMinValue(0.0f); ScaleSlider->SetMaxValue(1.0f);
 	ScaleSlider->OnValueChanged.AddDynamic(this, &UOreDealInteractionWidget::OnScaleChanged);
 	SettingsPanel->AddChildToVerticalBox(ScaleSlider);
@@ -202,28 +285,49 @@ void UOreDealInteractionWidget::BuildInterface()
 	ChatPanel->SetContent(ChatBody);
 	SetCanvasRect(RootCanvas, ChatPanel, FVector2D(20.0f, 18.0f), FVector2D(410.0f, 145.0f));
 	ChatSlot = Cast<UCanvasPanelSlot>(ChatPanel->Slot);
+	// Expanded chat must cover the store button below it.
+	if (ChatSlot) ChatSlot->SetZOrder(5);
 
 	ChatInput = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("ChatInput"));
+	{
+		FEditableTextBoxStyle InputStyle = ChatInput->GetWidgetStyle();
+		const FSlateBrush InputBrush = DuiTooltipBrush();
+		InputStyle.SetBackgroundImageNormal(InputBrush);
+		InputStyle.SetBackgroundImageHovered(InputBrush);
+		InputStyle.SetBackgroundImageFocused(InputBrush);
+		InputStyle.SetBackgroundImageReadOnly(InputBrush);
+		InputStyle.SetForegroundColor(FSlateColor(DuiInk));
+		InputStyle.SetFocusedForegroundColor(FSlateColor(DuiInk));
+		InputStyle.SetPadding(FMargin(12.0f, 6.0f, 14.0f, 6.0f));
+		ChatInput->SetWidgetStyle(InputStyle);
+	}
 	ChatInput->SetHintText(FText::FromString(TEXT("메시지를 입력하고 Enter를 누르세요")));
 	ChatInput->SetVisibility(ESlateVisibility::Collapsed);
 	ChatInput->OnTextCommitted.AddDynamic(this, &UOreDealInteractionWidget::OnChatTextCommitted);
 	ChatBody->AddChildToVerticalBox(ChatInput);
 
 	ToastPanel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("SaleToast"));
-	ToastPanel->SetBrushColor(FLinearColor(0.025f, 0.02f, 0.018f, 0.88f));
-	ToastText = MakeLabel(WidgetTree, TEXT(""), 25);
+	ToastPanel->SetBrush(DuiNotificationBrush());
+	ToastPanel->SetPadding(FMargin(24.0f, 10.0f, 30.0f, 12.0f));
+	ToastPanel->SetHorizontalAlignment(HAlign_Center);
+	ToastPanel->SetVerticalAlignment(VAlign_Center);
+	ToastText = MakeLabel(WidgetTree, TEXT(""), 22);
+	ToastText->SetColorAndOpacity(FSlateColor(DuiInk));
 	ToastText->SetJustification(ETextJustify::Center);
 	ToastPanel->SetContent(ToastText);
 	ToastPanel->SetVisibility(ESlateVisibility::Collapsed);
 	SetCanvasRect(RootCanvas, ToastPanel, FVector2D(-22.0f, 22.0f), FVector2D(470.0f, 72.0f), FVector2D(1.0f, 0.0f), FVector2D(1.0f, 0.0f));
 
-	UButton* MerchantButton = MakeButton(WidgetTree, TEXT("🤠 상점 (F)"), 20);
+	UButton* MerchantButton = MakeButton(WidgetTree, TEXT("상점 (F)"), 20);
+	// Named so UOreDealPreGameComponent can hide it until the host starts the game.
+	MerchantButton->Rename(TEXT("StoreButton"));
 	MerchantButton->OnClicked.AddDynamic(this, &UOreDealInteractionWidget::OnMerchantClicked);
 	// Keep the merchant control away from the lobby's centered start prompt and the
 	// gameplay phase HUD. This button is the reliable screen-space entry point even
 	// when the 3D merchant mesh has no interaction tag.
 	MerchantButton->SetVisibility(ESlateVisibility::Visible);
-	SetCanvasRect(RootCanvas, MerchantButton, FVector2D(24.0f, 112.0f), FVector2D(300.0f, 64.0f));
+	// Sits just under the collapsed chat panel (18 + 132 + gap).
+	SetCanvasRect(RootCanvas, MerchantButton, FVector2D(20.0f, 160.0f), FVector2D(220.0f, 56.0f));
 
 	// The old wagon sales panel is gone: selling now lives in the store window (F, UOreDealStoreWidget),
 	// so its widgets are no longer built. SalesPanel stays null and IsSalesOpen() is always false.
@@ -756,17 +860,17 @@ void UOreDealInteractionWidget::ApplyHandSelection()
 
 void UOreDealInteractionWidget::ApplyChatLayout()
 {
-	if (ChatSlot) ChatSlot->SetSize(FVector2D(410.0f, bChatExpanded ? 500.0f : 112.0f));
+	if (ChatSlot) ChatSlot->SetSize(FVector2D(410.0f, bChatExpanded ? 500.0f : 132.0f));
 	if (ChatPanel) ChatPanel->SetVisibility(ESlateVisibility::Visible);
 	if (ChatScroll)
 	{
-		if (USizeBox* SizeBox = Cast<USizeBox>(ChatScroll->GetParent())) SizeBox->SetHeightOverride(bChatExpanded ? 395.0f : 68.0f);
+		if (USizeBox* SizeBox = Cast<USizeBox>(ChatScroll->GetParent())) SizeBox->SetHeightOverride(bChatExpanded ? 380.0f : 70.0f);
 	}
 }
 
 void UOreDealInteractionWidget::ApplyChatSettings()
 {
-	if (ChatPanel) ChatPanel->SetBrushColor(FLinearColor(0.025f, 0.02f, 0.018f, ChatOpacity));
+	if (ChatPanel) ChatPanel->SetBrushColor(FLinearColor(1.0f, 1.0f, 1.0f, ChatOpacity));
 	if (ChatPanel) ChatPanel->SetRenderScale(FVector2D(ChatScale, ChatScale));
 }
 
@@ -779,7 +883,13 @@ void UOreDealInteractionWidget::AddChatMessage(const FString& Sender, const FStr
 	ChatHistory.Add(Line);
 	if (ChatHistory.Num() > 100) ChatHistory.RemoveAt(0, ChatHistory.Num() - 100);
 	ChatScroll->ClearChildren();
-	for (const FString& Item : ChatHistory) ChatScroll->AddChild(MakeLabel(WidgetTree, Item, 16));
+	for (const FString& Item : ChatHistory)
+	{
+		UTextBlock* ChatLine = MakeLabel(WidgetTree, Item, 15);
+		ChatLine->SetColorAndOpacity(FSlateColor(DuiInk));
+		ChatLine->SetAutoWrapText(true);
+		ChatScroll->AddChild(ChatLine);
+	}
 	if (bWasAtEnd) ChatScroll->ScrollToEnd();
 	else ChatScroll->SetScrollOffset(PreviousScrollOffset);
 }

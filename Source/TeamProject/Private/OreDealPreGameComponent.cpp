@@ -16,8 +16,9 @@
 namespace
 {
 	const FName MerchantTag(TEXT("OreDealMerchant"));
-	// HUD children hidden while waiting: resource bar (wood/gold) and the turn phase label.
-	const FName WaitingHiddenHudWidgets[] = { FName(TEXT("ResBar")), FName(TEXT("TxtPhase")) };
+	// HUD children hidden while waiting: resource bar (wood/gold), the turn phase label, the key-guide frame
+	// (WBP_HUD) and the store button (UOreDealInteractionWidget).
+	const FName WaitingHiddenHudWidgets[] = { FName(TEXT("ResBar")), FName(TEXT("TxtPhase")), FName(TEXT("TurnFrame")), FName(TEXT("StoreButton")) };
 	// Left hand resting on the table, mirrored from the right hand (RightHandRoot 38,12,79 / RightHand roll 90 yaw -90).
 	const FVector RestingLeftHandLocation(38.0f, -12.0f, 79.0f);
 	const FRotator RestingLeftHandRotation(0.0f, -90.0f, 90.0f); // pitch, yaw, roll
@@ -99,7 +100,9 @@ void UOreDealPreGameComponent::ApplyHud(bool bWaiting)
 	UWidgetBlueprintLibrary::GetAllWidgetsOfClass(PC, Widgets, UUserWidget::StaticClass(), false);
 	for (UUserWidget* Hud : Widgets)
 	{
-		if (!Hud || Hud->GetOwningPlayer() != PC || !Hud->GetClass()->GetName().StartsWith(TEXT("WBP_HUD"))) continue;
+		if (!Hud || Hud->GetOwningPlayer() != PC) continue;
+		const FString HudClassName = Hud->GetClass()->GetName();
+		if (!HudClassName.StartsWith(TEXT("WBP_HUD")) && HudClassName != TEXT("OreDealInteractionWidget")) continue;
 		for (const FName& Name : WaitingHiddenHudWidgets)
 		{
 			UWidget* Child = Hud->GetWidgetFromName(Name);
