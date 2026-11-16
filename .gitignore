@@ -16,6 +16,7 @@ Plugins/**/Intermediate/
 # 개인용 콘텐츠 폴더 (각자 테스트용)
 Content/Developers/
 Content/Collections/
+Docs/AI_작업노트.md
 
 # IDE / OS 잡파일
 *.sln

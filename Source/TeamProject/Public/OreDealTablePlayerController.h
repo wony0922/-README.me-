@@ -12,6 +12,9 @@ class UOreDealInteractionWidget;
 class UOreDealHandViewWidget;
 class UOreDealPreGameComponent;
 class AOreDealMarketBroker;
+class UOreDealAuctionComponent;
+class UOreDealStoreComponent;
+struct FOreDealStoreWagonView;
 class APlayerState;
 struct FInputKeyEventArgs;
 
@@ -28,7 +31,13 @@ public:
 	virtual void UpdateRotation(float DeltaTime) override;
 	virtual bool InputKey(const FInputKeyEventArgs& Params) override;
 
+	/** Opens/closes the store window (F). Kept under the old name for the HUD merchant button. */
 	void ToggleSalesMenu();
+	/** Called by the store component: switches cursor/input mode and closes the other local panels. */
+	void OnStoreOpenChanged(bool bOpen);
+	/** What the store's sell tab shows for each of my wagons (same rules as the server-side sale). */
+	void GetStoreWagons(TArray<FOreDealStoreWagonView>& OutWagons) const;
+	UOreDealStoreComponent* GetStoreComponent() const { return StoreComponent; }
 	void HandleChatEnter();
 	void RequestSellWagon(int32 WagonIndex);
 	void ToggleHandRack(AActor* RackActor = nullptr);
@@ -40,10 +49,6 @@ public:
 	void RequestMarketSetOffer(const TArray<int32>& HandIndices);
 	void RequestMarketBeginDeal(APlayerState* Target, const TArray<int32>& MarketIndices);
 	void RequestMarketConsent(bool bAccept);
-	int32 GetForcedWagonSlotForHandFront() const;
-	int32 GetForcedWagonSlotForResource(int32 ResourceType) const;
-	void MoveTableFocus(int32 Delta);
-	void HandleTableSpace();
 	UFUNCTION(Client, Reliable) void ClientShowSaleToast(const FString& Resource, int32 Count);
 	/** Records a hand-card placement on the server when the owning remote client plants. */
 	UFUNCTION(Server, Reliable) void ServerRecordMandatoryHandPlacement(AActor* CardDeck, APlayerState* PlacingPlayer);
@@ -51,8 +56,10 @@ public:
 	UFUNCTION(Server, Reliable) void ServerCompleteTurnStage();
 	/** Starts the existing animated supply draw, only while the local player is in phase four. */
 	UFUNCTION(Server, Reliable) void ServerRequestSupplyDraw();
-	/** Server validated card placement enforcing mandatory same-slot rules. */
-	UFUNCTION(Server, Reliable) void ServerPlaceCard(bool bFromReveal, bool bReveal1, bool bWagon1);
+	UOreDealAuctionComponent* GetAuctionComponent() const { return AuctionComponent; }
+	/** Wagon the A/D focus is on (0 = 마차 1, left; 1 = 마차 2, right). Drives BP_PC_Table.FocusIndex 2/3. */
+	int32 GetWagonFocus() const;
+	void SetWagonFocus(int32 WagonIndex);
 
 protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ore Deal|Camera", meta=(ClampMin="0", ClampMax="90"))
@@ -69,6 +76,12 @@ protected:
 	TObjectPtr<UOreDealHandViewWidget> HandViewWidget;
 	UPROPERTY(Transient)
 	TObjectPtr<UOreDealPreGameComponent> PreGameComponent;
+	/** Auction-style trade phase: RPCs, input, HUD and floating cards. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ore Deal")
+	TObjectPtr<UOreDealAuctionComponent> AuctionComponent;
+	/** Store window (F): sell wagons, buy items. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ore Deal")
+	TObjectPtr<UOreDealStoreComponent> StoreComponent;
 
 private:
 	TWeakObjectPtr<APawn> YawReferencePawn;
@@ -80,6 +93,8 @@ private:
 	bool bHasKeyboardFocusSnapshot = false;
 	bool bPointerCentered = false;
 	bool bChatEnterConsumed = false;
+	/** True while the camera eases back inside the yaw limit after an auction camera turn. */
+	bool bCameraReturning = false;
 	bool bSupplyDrawRequested = false;
 	int32 SupplyDrawInitialHandCount = 0;
 	int32 SupplyDrawRequestedCount = 0;
