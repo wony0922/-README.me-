@@ -1,7 +1,7 @@
 # AI 작업노트 — Ore Deal (TeamProject)
 
 > 새 대화에서 Claude에게: "Docs/AI_작업노트.md 읽고 이어서 하자" 라고 하면 됩니다.
-> 마지막 정리: 2026-11-15 (주제별로 다시 정리. 날짜별 원본 기록은 `Docs/AI_작업노트_이전기록.md`)
+> 마지막 정리: 2026-11-23 (주제별로 다시 정리. 날짜별 원본 기록은 `Docs/AI_작업노트_이전기록.md`, 살롱 적용 이후 작업 요약은 `Docs/작업내역_요약_살롱이후.md`)
 > 사용자 선호: "푸쉬할거야" 하면 GitHub Desktop 커밋/푸쉬를 **직접 하지 말고 단계별로 안내**.
 
 ---
@@ -10,6 +10,8 @@
 - 2~4인 LAN 멀티 보드/카드게임(Listen Server). 메인메뉴 → 방 만들기/참가 → `Lvl_Table`(살롱 맵)에서 플레이.
 - 턴은 4단계: **1/4 매립 → 2/4 경매 거래 → 3/4 가져온 자원 배치 → 4/4 보급(드로우)**. 경매 거래는 C++(`OreDealAuctionBroker`)로 구현됨.
 - 상점(F 키, C++): 판매 탭(마차 통째로 판매)·구매 탭(나무 구매) 동작 확인.
+- 살롱 바깥에 서부 마을(앞길 건물·도로, 살롱 뒤 광산·뒷마당·텐트촌·묘지, 먼 메사)이 있음. 두 레벨(`Lvl_Table`, `Lvl_MainMenu`) 모두 같은 배치, 저사양용으로 구역별 5개 메시로 합쳐 둠.
+- 게임 실행 시 메인메뉴 전에 6.5초 인트로(시네마틱 카메라가 마을 상공에서 휘어 내려와 살롱 정면, 해가 지며 노을). 끝나면 메뉴 버튼 표시.
 - UI 전체가 크림색 픽셀아트(Everyday Life Dialogue UI) + Mona 픽셀 폰트로 통일됨(메인메뉴, HUD, 대화창, 경매 안내, 상점, 결과 화면).
 - 버그 수정 담당 구분: 팀원 C++ 규칙 코드의 버그(자원 5종/8종 불일치, 덱 소진 시 2단계 정지, 1장 판매 조건 등)는 **팀원 담당**, 손대지 않음.
 
@@ -162,13 +164,37 @@
 ## 11. 아트 / 모델 / 최적화
 - 캐릭터(현재): `/Game/Asset/Char2/SM_Char2_{Head,Body}_{Base,Cowboy,Ranger}`. `BP_SeatedPlayer`의 `CharacterMeshes`/`HeadMeshes` = [Cowboy, Ranger, Base]. 머리 원점 = 목, 머리 위치 z39. Blender 컬렉션 `MT_Character2`. (예전 `Player1/2`의 `SM_Char_*_R`은 미사용)
 - 손(현재): `SK_Hand2b_L/R` + 애니 `SK_Hand2b_*_Anim_Open/Grip/Relax/Fist/ThumbsUp/Point`. 가리키기 손가락 문제(쿼터니언 키 vs 오일러 본) · 엄지척 손날 문제(웨이트) 해결됨. (예전 `Hands/`, `Hand2/`는 미사용)
-- 살롱: Blender `MT_Saloon` → `/Game/Asset/Saloon/SM_Saloon_*`. 기존 `Floor`는 숨김+충돌 끔.
-- 저사양 최적화: Lumen GI 끔, 반사 화면 공간, 일반 섀도 맵, 레이트레이싱·메시 거리 필드 끔. 캐릭터/살롱 LOD 추가, `chair1`·`bar_table` Nanite 끔. (월드 파티션이라 라이트 베이크 불가 → 조명 실시간)
+- 살롱: Blender `MT_Saloon` → `/Game/Asset/Saloon/SM_Saloon_*`. `Lvl_Table`에선 (40,-60,0), `Lvl_MainMenu`에선 (0,0,0). 기존 `Floor`는 숨김+충돌 끔.
 - 입력: `IMC_Default`에서 IA_Move/IA_Jump 삭제(이동 없음).
 
+### 11-1. 마을 레벨 (11/23)
+- 원본: Blender `SourceArt/Town/Town.blend`(스크립트로 만든 로우폴리, 컬렉션 기본 = 앞길·소품, `Back` = 살롱 뒤) → FBX `SourceArt/Town/FBX/` → `/Game/Asset/Town/SM_TW_*`(머티리얼 `TW_*`, Nanite 끔). 건물 앞면 = 메시 +Y.
+- 배치(`Lvl_Table` 좌표, cm): 바닥 높이 z -46. 사막 바닥 z -55(반경 1800m). 큰길 = 살롱 앞 y 1100~2300(X 방향), 옆길 x ≈ -1400(Y 방향). 살롱 쪽 건물 줄 yaw 0·앞벽 y 600, 맞은편 yaw 180·앞벽 y 2700.
+  - 간판 건물: GENERAL STORE, BANK, HOTEL, SHERIFF, BARBER, BLACKSMITH, POST OFFICE, ASSAY OFFICE + 집·헛간. 소품: 말뚝(물통), 가로등(발광 머티리얼만, 실제 라이트 없음), 포장마차, 통·상자, 선인장, 멀리 메사 20개.
+  - 살롱 뒤: 뒷마당(장작더미·변소 2·우물·빨랫줄·건초·말 우리·풍차·물탱크), 광산(언덕 (1200,-7000) 입구 +Y, "ORE MINE" 간판, 레일 x 1200·y -7000~-3800, 광석 수레 4·광석 더미 6(석탄/금/철/다이아 색)·하역대·광산길), 텐트촌(텐트 4·모닥불), 묘지(중심 (-3600,-4300)), 바위·마른 나무.
+- `Lvl_MainMenu`에도 같은 마을이 있음(메뉴 레벨은 살롱이 (0,0)이라 (-40,+60) 옮겨 배치). **마을을 고치면 두 레벨 모두 반영해야 함.**
+- **지금은 구역별로 합친 메시 5개**(폴더 `Town/Merged`): `Town_TWM_Street / Back / Ground / Mesas / Cacti`, 에셋 `/Game/Asset/Town/Merged/SM_TWM_<레벨>_<구역>`. 충돌 없음, Ground·Mesas 그림자 안 드리움.
+  - 원래 개별 배치 백업: `Saved/town_layout_Lvl_Table.json`, `Saved/town_layout_Lvl_MainMenu.json`(라벨·폴더·메시·트랜스폼). 건물 하나를 옮기려면 json으로 `SM_TW_*`를 다시 깔고 → 수정 → 다시 합치기.
+
+### 11-2. 메인메뉴 화면 / 인트로 연출 (11/23)
+- `MenuCamera`(자동 활성) = (-2.5,1512,179), pitch 3 / yaw -90.35, FOV 90 → 길 한가운데서 살롱 정면.
+- 시퀀스 `/Game/MaterialTraders/Cinematics/LS_MenuIntro`(30fps, 6.5초). `Lvl_MainMenu` 폴더 `Cinematics`: `IntroCineCamera`(시네 카메라, 초점 끔, 화면비 고정 끔, 초점거리 11.88 = FOV 90), `IntroSequence`(LevelSequenceActor, Auto Play).
+  - 카메라: 트랜스폼 키 4개(Auto 보간) 상공 (-1304,1964,2203) → 왼쪽 위로 휘어 → MenuCamera 위치. 끝나면 카메라 컷이 풀리며 MenuCamera(같은 구도)로 이어짐.
+  - 해: 메뉴 레벨 DirectionalLight 피치 -42 → -28 → -11.55. 끝 = `Lvl_Table`의 해(피치 -11.55, 요 -1.89, 6500K)와 동일.
+  - 노을 하늘(메뉴 레벨만, `Lvl_Table` 하늘은 그대로): HeightFog 위치 z -46, 밀도 0.018(연출 중 0.002 → 0.018), 시작거리 35m, 인스캐터링 (1.4,0.55,0.22), 방향성 (4,1.5,0.4) 지수 5. SkyAtmosphere 스카이 휘도 계수 (1,0.88,0.75)(연출 중 흰색 → 이 값), 미 산란 0.009, 이방성 0.85.
+- `BP_PC_Menu` BeginPlay: Branch(IsLocal) → **Delay 6.5** → 메뉴 위젯 생성. 시퀀스 길이를 바꾸면 Delay도 같이 바꿀 것. 게임 끝나고 메뉴로 돌아와도 연출이 다시 나옴, 건너뛰기 없음.
+
+### 11-3. 저사양 최적화
+- 1차(11/14): Lumen GI 끔, 반사 화면 공간, 일반 섀도 맵, 레이트레이싱·메시 거리 필드 끔. 캐릭터/살롱 LOD 추가, `chair1`·`bar_table` Nanite 끔. (월드 파티션이라 라이트 베이크 불가 → 조명 실시간)
+- 2차(11/23, 두 레벨 모두): 마을 메시 합치기(액터 227 → 5, 섹션 679 → 46). 포인트 라이트 그림자는 `Light_Chandelier`만(벽등·Bar·TableFill 끔). 해 그림자 캐스케이드 4→3, 거리 200m→80m. 스카이라이트 실시간 캡처 끔(시작 시 1회). 볼류메트릭 구름 샘플 0.5(반사 0.25). 포스트프로세스 모션블러·렌즈플레어 0.
+- 프로젝트(`DefaultEngine.ini`, 백업 `DefaultEngine.ini.bak_optimize`): 안티에일리어싱 TSR → TAA, 모션블러 기본 끔, 리플렉션 → 없음. Substrate는 켜진 채 둠(끄면 더 가볍지만 셰이더 전체 재컴파일·외형 변화 가능).
+- **파이썬으로 액터 수정 시 주의**: `set_actor_location`/`set_cast_shadows`처럼 Modify를 안 부르는 함수로 바꾸면 저장이 안 됨(메뉴 카메라가 되돌아간 적 있음). `actor.modify()` 후 `set_editor_property`로 바꾸고, 레벨을 다시 열어 확인.
+
 ## 12. 남은 일 / 확인 필요
+> 2026-11-23: 아래 남은 일·나중에 할 것은 **팀원이 맡기로 함**(사용자 결정). Claude는 요청이 없으면 손대지 않음.
+
 **결정 필요**
-- 1장 마차 판매 조건: 서버 코드는 "마차 2대 모두 1장"일 때만 허용, README 문구대로면 한쪽이 비고 한쪽이 1장일 때도 가능해야 함 → 팀원 규칙 코드라 그대로 둠. README대로 바꿀지 사용자에게 확인.
+- 1장 마차 판매 조건: 서버 코드는 "마차 2대 모두 1장"일 때만 허용, README 문구대로면 한쪽이 비고 한쪽이 1장일 때도 가능해야 함 → 팀원 규칙 코드라 그대로 둠.
 - 상대 턴 문구("다른 플레이어의 턴 · 시야 회전 / 이모트(휠 클릭)만 가능")는 BP 그래프 글자 → 짧게 바꿀지.
 - 메인메뉴에 게임 제목 간판 넣을지.
 
@@ -177,13 +203,16 @@
 - 경매: 가져온 카드 배치가 덱 위 카드 소진 후에만 되는지(2인 이상), 호스트 연속 배치.
 - UI: 결과 화면, 판매 토스트, 경매 경고 문구, 채팅 입력창, 방 목록 한 줄(`WBP_RoomEntry`)을 화면으로 확인.
 - 클라 뷰포트에 대화창·상점 버튼이 2벌 겹쳐 생성되는 현상(`OreDealInteractionWidget` 2개) — 원인 미확인.
+- 마을·연출: 실제 저사양 PC에서 프레임 측정 안 함.
 
 **나중에**
 - 나무(Wood) 획득 규칙, 세 번째 마차 구매, 덱 소진 종료, 동점 처리, 플레이어 이름 표시, F9 디버그 키 제거.
 - 상점 세 번째 탭 용도(`UOreDealStoreWidget`의 `Tab == 2`).
 - 덱 Y축 방향 자리에서 덱 위 카드 3장 이상일 때 비스듬히 보일 수 있음.
 - 팀원용 작업노트(`Docs/팀원용_작업노트.md`, 10/16 기준) 갱신: 조작키 표(M → F, 상점), 용어 표, 깨진 표 정리. 팀원에게 컨트롤러·InteractionWidget·PreGame·TurnBridge 수정 사실 공유.
-- 커밋/푸쉬는 사용자가 직접(요청 시 단계별 안내). 새 폴더: `Content/MaterialTraders/UI/Dialogue/`, `Content/MaterialTraders/UI/Fonts/`, `SourceArt/UI/Dialogue/`, `SourceArt/Fonts/Mona/`, `SourceArt/UI/Store/`, `Content/MaterialTraders/UI/Store/`, 새 cpp/h `OreDealStore*`, 삭제된 `__ExternalActors__`(상인 8개).
+- 커밋/푸쉬는 사용자가 직접(요청 시 단계별 안내). 올릴 것:
+  - 11/15분: `Content/MaterialTraders/UI/Dialogue/`, `Content/MaterialTraders/UI/Fonts/`, `SourceArt/UI/Dialogue/`, `SourceArt/Fonts/Mona/`, `SourceArt/UI/Store/`, `Content/MaterialTraders/UI/Store/`, 새 cpp/h `OreDealStore*`, 삭제된 `__ExternalActors__`(상인 8개).
+  - 11/23분: `Content/Asset/Town/`(+`Merged/`), `Content/MaterialTraders/Cinematics/`, `SourceArt/Town/`, `BP_PC_Menu`, 두 레벨의 `__ExternalActors__`(마을 추가·삭제, 조명·카메라 변경), `Config/DefaultEngine.ini`, `Docs/`. (`Saved/`는 보통 Git 제외 → 배치 백업 json은 필요하면 따로 보관)
 
 ## 13. 변경 이력 (요약, 자세한 내용은 `AI_작업노트_이전기록.md`)
 - 10/13~10/16: 블루프린트로 기본 게임(메인메뉴·방, 덱·마차·정산, 턴, 드로우 애니, 이모트, 결과·재시작), 캐릭터 머리 분리, 손·덱 크기 조정.
@@ -191,3 +220,4 @@
 - 11/10~11: 작업 폴더 이동, 살롱·조명 적용, 이동 입력 삭제, 카드 랙 삭제, Q 손패 보기(C++).
 - 11/14: 경매 거래 시스템(C++), 마차판 이미지, 저사양 최적화, 새 손(Hand2/2b), 새 캐릭터(Char2) 3종.
 - 11/15: 상점(F), 브로커 캐시 최적화, Dialogue UI 크림 테마 + Mona 픽셀 폰트 전체 적용(메인메뉴·HUD·결과 포함), 상점 버튼 대기 중 숨김, 키 가이드를 재화 UI 아래로 이동·단계 글자 숨김, unity 충돌 수정(`ControllerResourceNames`).
+- 11/23: 살롱 주변 서부 마을(앞길·살롱 뒤 광산·뒷마당·텐트촌·묘지), 메인메뉴를 살롱 정면 구도로 + 인트로 시네마틱(카메라 이동·노을), 저사양 최적화 2차(메시 합치기·그림자·AA). 남은 일은 팀원이 맡기로 함.
