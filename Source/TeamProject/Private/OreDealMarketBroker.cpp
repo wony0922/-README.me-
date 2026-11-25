@@ -1,5 +1,6 @@
 #include "OreDealMarketBroker.h"
 
+#include "Components/TextRenderComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/GameModeBase.h"
@@ -15,9 +16,28 @@
 namespace
 {
 	constexpr int32 ResourceCount = 8;
-	const TCHAR* ResourceNames[ResourceCount] = { TEXT("Wood"), TEXT("Coal"), TEXT("Copper"), TEXT("Iron"), TEXT("Silver"), TEXT("Gold"), TEXT("Diamond"), TEXT("Adamantium") };
-	int32 ResourceSaleReward(int32 Resource, int32 Count)
+	const TCHAR* ResourceNames[ResourceCount] = { TEXT("Rock"), TEXT("Coal"), TEXT("Copper"), TEXT("Iron"), TEXT("Silver"), TEXT("Gold"), TEXT("Diamond"), TEXT("Adamantium") };
+
+	/**
+	 * Data Asset 이 지정돼 있으면 그 SaleTiers 를 사용하고,
+	 * 없으면 기존 하드코딩 테이블로 폴백.
+	 */
+	int32 ResourceSaleReward(int32 Resource, int32 Count, const UOreDealCardInfoAsset* Asset = nullptr)
 	{
+		// --- Data Asset 경로 ---
+		if (Asset && Asset->CardInfos.IsValidIndex(Resource))
+		{
+			const FOreDealCardInfo& Info = Asset->CardInfos[Resource];
+			int32 Result = 0;
+			for (const FOreDealSaleTier& Tier : Info.SaleTiers)
+			{
+				if (Count >= Tier.MinCount)
+					Result = Tier.Reward;
+			}
+			return Result;
+		}
+
+		// --- 폴백: 하드코딩 테이블 ---
 		static const int32 Thresholds[ResourceCount][4] = {
 			{4,6,8,10}, {3,5,7,8}, {3,4,6,7}, {2,4,5,6},
 			{2,4,6,7}, {2,4,5,6}, {2,3,4,5}, {2,3,0,0}
@@ -354,7 +374,7 @@ int32 AOreDealMarketBroker::FindForcedHarvestSlot(const TArray<int32>& Types, co
 	{
 		const bool bCanSell = Counts[I] >= 2 || CanSellSingleCardSlot(Counts, I);
 		if (!bCanSell || Types[I] < 0 || Types[I] >= ResourceCount) continue;
-		const int32 Reward = ResourceSaleReward(Types[I], Counts[I]);
+		const int32 Reward = ResourceSaleReward(Types[I], Counts[I], CardInfoAsset);
 		if (Reward < BestReward || (Reward == BestReward && Counts[I] < BestCount))
 		{
 			Best = I; BestReward = Reward; BestCount = Counts[I];
@@ -370,7 +390,7 @@ void AOreDealMarketBroker::HarvestSlot(APlayerState* Player, AActor* Board, TArr
 	const int32 Count = Counts[Slot];
 	if (Resource < 0 || Resource >= ResourceCount || Count <= 0) return;
 	if (FIntProperty* Gold = FindFProperty<FIntProperty>(Player->GetClass(), TEXT("Gold")))
-		Gold->SetPropertyValue_InContainer(Player, Gold->GetPropertyValue_InContainer(Player) + ResourceSaleReward(Resource, Count));
+		Gold->SetPropertyValue_InContainer(Player, Gold->GetPropertyValue_InContainer(Player) + ResourceSaleReward(Resource, Count, CardInfoAsset));
 	if (FIntProperty* Grave = FindFProperty<FIntProperty>(Board->GetClass(), TEXT("GraveCount")))
 		Grave->SetPropertyValue_InContainer(Board, Grave->GetPropertyValue_InContainer(Board) + Count);
 	Types[Slot] = INDEX_NONE;

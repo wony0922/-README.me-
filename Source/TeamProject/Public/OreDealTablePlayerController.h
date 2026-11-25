@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
+#include "OreDealStoreCatalog.h"
 #include "OreDealTablePlayerController.generated.h"
 
 class APawn;
@@ -14,9 +15,17 @@ class UOreDealPreGameComponent;
 class AOreDealMarketBroker;
 class UOreDealAuctionComponent;
 class UOreDealStoreComponent;
-struct FOreDealStoreWagonView;
+class UOreDealStoreWidget;
+class UUserWidget;
 class APlayerState;
 struct FInputKeyEventArgs;
+
+UENUM(BlueprintType)
+enum class EOreDealSlotEffect : uint8
+{
+	CoinBurst,
+	MineralShatter
+};
 
 /** Keeps table-game camera rotation modest and lets the center-screen pointer choose cards. */
 UCLASS(BlueprintType, Blueprintable)
@@ -30,14 +39,33 @@ public:
 	virtual void PlayerTick(float DeltaTime) override;
 	virtual void UpdateRotation(float DeltaTime) override;
 	virtual bool InputKey(const FInputKeyEventArgs& Params) override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	/** Opens/closes the store window (F). Kept under the old name for the HUD merchant button. */
+	UFUNCTION(BlueprintCallable, Category="Ore Deal|Store")
 	void ToggleSalesMenu();
 	/** Called by the store component: switches cursor/input mode and closes the other local panels. */
 	void OnStoreOpenChanged(bool bOpen);
 	/** What the store's sell tab shows for each of my wagons (same rules as the server-side sale). */
 	void GetStoreWagons(TArray<FOreDealStoreWagonView>& OutWagons) const;
+	const TArray<FOreDealStoreItem>& GetStoreItems() const { return StoreItems; }
+	const FOreDealStoreItem* FindStoreItem(FName ItemId) const;
+	UFUNCTION(BlueprintPure, Category="Ore Deal|Store")
+	void GetStoreCatalog(TArray<FOreDealStoreItem>& OutItems) const;
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Ore Deal|Store")
+	bool IsStoreGameStarted() const;
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Ore Deal|Store")
+	int32 GetStorePlayerGold() const;
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Ore Deal|Store")
+	bool HasEnoughStoreGold(int32 Cost) const;
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Ore Deal|Store")
+	bool CanGrantStoreItem(FName GrantProperty, int32 Amount) const;
+	UFUNCTION(BlueprintNativeEvent, Category="Ore Deal|Store")
+	bool ValidateStorePurchase(FName ItemId, int32 Cost, int32 Amount, FName GrantProperty, FString& OutMessage);
+	virtual bool ValidateStorePurchase_Implementation(FName ItemId, int32 Cost, int32 Amount, FName GrantProperty, FString& OutMessage);
 	UOreDealStoreComponent* GetStoreComponent() const { return StoreComponent; }
+	TSubclassOf<UOreDealStoreWidget> GetStoreWidgetClass() const;
+	void NormalizeStoreCatalog();
 	void HandleChatEnter();
 	void RequestSellWagon(int32 WagonIndex);
 	void ToggleHandRack(AActor* RackActor = nullptr);
@@ -49,17 +77,48 @@ public:
 	void RequestMarketSetOffer(const TArray<int32>& HandIndices);
 	void RequestMarketBeginDeal(APlayerState* Target, const TArray<int32>& MarketIndices);
 	void RequestMarketConsent(bool bAccept);
+	UFUNCTION(BlueprintPure, Category="Ore Deal|Store")
+	AActor* GetStorePlayerBoard() const { return GetPlayerBoard(); }
+	UFUNCTION(BlueprintImplementableEvent, Category="Ore Deal|Store")
+	void BP_GrantStoreWagonSlotUpgrade();
 	UFUNCTION(Client, Reliable) void ClientShowSaleToast(const FString& Resource, int32 Count);
+	UFUNCTION(Client, Reliable) void ClientReceiveChat(const FString& Sender, const FString& Message);
+	UFUNCTION(Client, Reliable) void ClientPlayWagonEffect(AActor* Board, int32 WagonIndex, EOreDealSlotEffect EffectType);
+	static void BroadcastWagonEffect(UWorld* World, AActor* Board, int32 WagonIndex, EOreDealSlotEffect EffectType);
+	static int32 CalculateSaleReward(int32 Resource, int32 Count, const UObject* WorldContext = nullptr);
+	UFUNCTION(Client, Reliable) void ClientSetWagonFocus(int32 WagonIndex);
+
+	/** 우승자 결정 및 게임 종료 세레머니 시작 RPC */
+	UFUNCTION(Client, Reliable) void ClientStartGameOverCeremony(APlayerState* WinnerPlayerState);
 	/** Records a hand-card placement on the server when the owning remote client plants. */
 	UFUNCTION(Server, Reliable) void ServerRecordMandatoryHandPlacement(AActor* CardDeck, APlayerState* PlacingPlayer);
+	/** Plants the active hand card with auto-matching, 1-card waste protection, and sale/shatter settlement. */
+	UFUNCTION(Server, Reliable) void ServerPlantHandCard(int32 DesiredWagonIndex);
 	/** Advances only the current turn phase; the last phase also hands off to the next player. */
 	UFUNCTION(Server, Reliable) void ServerCompleteTurnStage();
 	/** Starts the existing animated supply draw, only while the local player is in phase four. */
 	UFUNCTION(Server, Reliable) void ServerRequestSupplyDraw();
+	UFUNCTION(Server, Reliable) void ServerPickupBottle(AActor* Bottle);
+	UFUNCTION(Server, Reliable) void ServerThrowBottle();
+	UFUNCTION(Client, Reliable) void ClientSetHoldingBottle(bool bHolding);
 	UOreDealAuctionComponent* GetAuctionComponent() const { return AuctionComponent; }
-	/** Wagon the A/D focus is on (0 = 마차 1, left; 1 = 마차 2, right). Drives BP_PC_Table.FocusIndex 2/3. */
+	/** Wagon the A/D focus is on (0 = 마차 1; drives BP_PC_Table.FocusIndex from 2). */
 	int32 GetWagonFocus() const;
 	void SetWagonFocus(int32 WagonIndex);
+	/** Server-side grant for the one-time store wagon-slot upgrade. */
+	bool GrantStoreWagonSlotUpgrade();
+
+	/** 상점 아이템 효과 실행 함수들 (서버 권한) */
+	bool ApplyAIGlasses(APlayerState* PurchasingPlayer);
+	bool ApplyWoodAxe(APlayerState* PurchasingPlayer);
+	bool ApplySpawnBottles(APlayerState* PurchasingPlayer);
+	bool ApplyChaosCard(APlayerState* PurchasingPlayer);
+
+	/** 더 많은 나무 효과(나무 획득량 2배) 활성화 여부 */
+	UPROPERTY(Replicated)
+	bool bHasWoodAxe = false;
+	UPROPERTY(Transient) TObjectPtr<AActor> HeldBottle;
+	bool bHoldingBottleLocal = false;
 
 protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ore Deal|Camera", meta=(ClampMin="0", ClampMax="90"))
@@ -82,6 +141,12 @@ protected:
 	/** Store window (F): sell wagons, buy items. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ore Deal")
 	TObjectPtr<UOreDealStoreComponent> StoreComponent;
+	/** Ordered shop products; editable in BP_PC_Table's defaults. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ore Deal|Store")
+	TArray<FOreDealStoreItem> StoreItems;
+	/** Optional WBP subclass for the store UI; falls back to the native implementation when unset. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ore Deal|Store")
+	TSubclassOf<UOreDealStoreWidget> StoreWidgetClass;
 
 private:
 	TWeakObjectPtr<APawn> YawReferencePawn;
@@ -98,13 +163,41 @@ private:
 	bool bSupplyDrawRequested = false;
 	int32 SupplyDrawInitialHandCount = 0;
 	int32 SupplyDrawRequestedCount = 0;
+	UPROPERTY() TArray<int32> SupplyDrawPendingCards;
 	float HandRackRefreshElapsed = 0.0f;
 	float TurnUIRefreshElapsed = 0.0f;
 	mutable TWeakObjectPtr<AActor> CachedPlayerBoard;
 	TWeakObjectPtr<AActor> CachedCardDeck;
 	float MarketRefreshElapsed = 0.0f;
 
+	// --- 게임 종료 세레머니 & 결과창 상태 ---
+	bool bInGameOverCeremony = false;
+	bool bWinnerCameraPhase = false;
+	bool bRandomCameraPhase = false;
+	bool bResultWidgetOpen = false;
+	bool bCanPressEnterForMainMenu = false;
+	float CeremonyTimeElapsed = 0.0f;
+	float WinnerPhaseDuration = 5.0f; // 우승자 카메라 연출 시간(초)
+	float CameraSwitchInterval = 4.0f; // 카메라 전환 간격(초)
+	float CurrentCameraTimer = 0.0f;
+	int32 CurrentCameraIndex = 0; // 2, 3, 4
+	FVector CameraOriginalLocation;
+	TWeakObjectPtr<AActor> CurrentActiveCamera;
+	TMap<int32, FVector> CameraInitialLocations;
+	TWeakObjectPtr<APlayerState> WinnerState;
+
+	UPROPERTY()
+	TObjectPtr<UUserWidget> ResultWidgetInstance;
+
+	void UpdateGameOverCeremony(float DeltaTime);
+	void SwitchToNextRandomCamera();
+	void ShowResultScreen();
+	void ReturnToMainMenu();
+
+	void CleanUpBoardWagonTexts();
+
 	AActor* GetPlayerBoard() const;
+	int32 GetWagonSlotCount() const;
 	void UpdatePointerSelection();
 	bool TraceCenterPointer(FHitResult& OutHit) const;
 	int32 GetCardFocusIndex(const FHitResult& Hit) const;
@@ -122,5 +215,4 @@ private:
 	UFUNCTION(Server, Reliable) void ServerMarketBeginDeal(APlayerState* Target, const TArray<int32>& MarketIndices);
 	UFUNCTION(Server, Reliable) void ServerMarketConsent(bool bAccept);
 	UFUNCTION(Server, Reliable) void ServerSendChat(const FString& Message);
-	UFUNCTION(Client, Reliable) void ClientReceiveChat(const FString& Sender, const FString& Message);
 };

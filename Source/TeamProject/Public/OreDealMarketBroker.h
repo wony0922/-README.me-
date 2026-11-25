@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "OreDealCardInfo.h"
 #include "OreDealMarketBroker.generated.h"
 
 class APlayerState;
@@ -83,6 +84,10 @@ private:
 	UPROPERTY(ReplicatedUsing=OnRep_MarketState) bool bActiveAccepted = false;
 	UPROPERTY(ReplicatedUsing=OnRep_MarketState) bool bTargetAccepted = false;
 	UPROPERTY(ReplicatedUsing=OnRep_MarketState) int32 Revision = 0;
+
+	/** 블루프린트 에디터에서 자원별 카드 수·판매 구간을 설정하는 Data Asset */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OreDeal|Config", meta = (DisplayName = "카드 정보 애셋", AllowPrivateAccess = "true"))
+	TObjectPtr<UOreDealCardInfoAsset> CardInfoAsset = nullptr;
 
 	TMap<TWeakObjectPtr<APlayerState>, TArray<int32>> PrivateOfferIndices;
 	TArray<int32> PendingMarketIndices;

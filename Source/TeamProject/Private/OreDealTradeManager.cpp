@@ -19,7 +19,7 @@ namespace
 			for (const FOreDealHarvestPayout& Payout : Payouts)
 				Rule.HarvestPayouts.Add(Payout);
 		};
-		AddRule(TEXT("Wood"), 20, 4, {{4, 1}, {6, 2}, {8, 3}, {10, 4}});
+		AddRule(TEXT("rock"), 20, 4, {{4, 1}, {6, 2}, {8, 3}, {10, 4}});
 		AddRule(TEXT("Coal"), 18, 3, {{3, 1}, {5, 2}, {7, 3}, {8, 4}});
 		AddRule(TEXT("Copper"), 16, 3, {{3, 1}, {4, 2}, {6, 3}, {7, 4}});
 		AddRule(TEXT("Iron"), 14, 2, {{2, 1}, {4, 2}, {5, 3}, {6, 4}});

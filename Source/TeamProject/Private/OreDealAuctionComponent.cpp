@@ -300,7 +300,6 @@ void UOreDealAuctionComponent::SubmitCurrent()
 	switch (LocalMode)
 	{
 	case EOreDealAuctionLocalMode::PickReveal:
-		if (Sorted.IsEmpty()) { Flash(TEXT("가져갈 카드를 1장 이상 고르세요 (C : 선택)")); break; }
 		BeginAwait();
 		ServerPickReveal(Sorted);
 		break;
@@ -528,7 +527,7 @@ void UOreDealAuctionComponent::RefreshHud()
 	switch (Broker->GetStage())
 	{
 	case EOreDealAuctionStage::PickReveal:
-		State.Status = bActive ? FString(TEXT("▶ 덱 위 카드 중 가져갈 카드를 고르세요 (여러 장 가능)   ·   A / D 이동   ·   C 선택   ·   Space 결정"))
+		State.Status = bActive ? FString(TEXT("▶ 덱 위 카드 중 가져갈 카드를 고르세요 (선택 안 하고 Space: 모두 거래)   ·   A / D 이동   ·   C 선택   ·   Space 결정"))
 		                       : FString::Printf(TEXT("%s 님이 가져갈 카드를 고르는 중..."), *ActiveName);
 		break;
 	case EOreDealAuctionStage::ActiveOffer:
@@ -537,9 +536,14 @@ void UOreDealAuctionComponent::RefreshHud()
 		State.PickerHint = TEXT("Z / X 이동   ·   C 선택   ·   Space 결정   (안 올리려면 그냥 Space)");
 		break;
 	case EOreDealAuctionStage::SelectLot:
-		State.Status = bActive ? FString(TEXT("▶ 덱 위 카드 중 이번에 거래할 카드를 고르세요 (여러 장 가능)   ·   A / D 이동   ·   C 선택   ·   Space 결정"))
+	{
+		TArray<int32> DeckCards;
+		AOreDealAuctionBroker::GetDeckCards(GetWorld(), DeckCards);
+		const FString SubNotice = DeckCards.Num() > 1 ? TEXT("(1장 또는 2장 동시 선택 가능)") : TEXT("(1장 선택)");
+		State.Status = bActive ? FString::Printf(TEXT("▶ 남아있는 카드 중 이번에 거래할 카드를 고르세요 %s   ·   A / D 이동   ·   C 선택   ·   Space 결정"), *SubNotice)
 		                       : FString::Printf(TEXT("%s 님이 거래할 카드를 고르는 중..."), *ActiveName);
 		break;
+	}
 	case EOreDealAuctionStage::Bidding:
 	{
 		int32 Confirmed = 0, Total = 0;
@@ -571,6 +575,12 @@ void UOreDealAuctionComponent::RefreshHud()
 		break;
 	}
 	default: break;
+	}
+
+	if (!State.Status.IsEmpty() && Broker->GetStage() != EOreDealAuctionStage::Idle)
+	{
+		State.Status += FString::Printf(TEXT("   [덱: %d장 · 소진: %d/%d]"),
+			Broker->GetRemainingDeckCount(), Broker->GetDeckDepletionCount(), Broker->GetMaxDeckDepletions());
 	}
 
 	if (LocalMode == EOreDealAuctionLocalMode::HandPick)

@@ -33,7 +33,7 @@ public:
 	/** Closing always cancels whatever was in progress (e.g. a purchase waiting for confirmation). */
 	void SetStoreOpen(bool bOpen);
 
-	UFUNCTION(Server, Reliable) void ServerBuyItem(FName ItemId);
+	UFUNCTION(Server, Reliable) void ServerBuyItem(FName ItemId, APlayerState* Target, int32 WagonIndex);
 	UFUNCTION(Client, Reliable) void ClientStoreNotice(const FString& Message, bool bSuccess);
 
 private:
@@ -41,14 +41,16 @@ private:
 	bool bStoreOpen = false;
 	float WagonRefreshElapsed = 0.0f;
 	int32 LastPushedGold = MIN_int32;
+	int32 LastPushedWood = MIN_int32;
 
 	APlayerController* GetOwnerController() const;
 	APlayerState* GetOwnerPlayerState() const;
 	bool IsLocallyOwned() const;
 	bool IsGameStarted() const;
 	int32 ReadGold() const;
+	int32 ReadWood() const;
 	void PushState(bool bRefreshWagons);
-	void RequestBuy(FName ItemId);
+	void RequestBuy(FName ItemId, APlayerState* Target, int32 WagonIndex);
 	void RequestSell(int32 WagonIndex);
 	void RequestClose();
 	bool GrantItem(const FOreDealStoreItem& Item, APlayerState* Player) const;

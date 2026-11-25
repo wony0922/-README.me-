@@ -11,8 +11,7 @@ class UWidget;
 
 /**
  * Local-only presentation for the waiting room (before BP_CardDeck.bGameStarted).
- * Hides the deck, wagon boards, merchant stands and the HUD resource bar / phase label,
- * and rests every seated player's left hand on the table like the right hand.
+ * Hides merchant stands and selected HUD elements, and rests seated players' left hands.
  * Everything is restored as soon as the host starts the game.
  */
 UCLASS(ClassGroup=(OreDeal))

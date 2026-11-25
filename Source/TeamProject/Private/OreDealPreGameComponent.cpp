@@ -80,8 +80,7 @@ void UOreDealPreGameComponent::ApplyTableActors(bool bWaiting)
 	for (TActorIterator<AActor> It(World); It; ++It)
 	{
 		AActor* Actor = *It;
-		if (IsClassNamed(Actor, TEXT("BP_CardDeck_C")) || IsClassNamed(Actor, TEXT("BP_CardBoard_C"))) Targets.Add(Actor);
-		else if (Actor->ActorHasTag(MerchantTag)) { Targets.Add(Actor); Merchants.Add(Actor); }
+		if (Actor->ActorHasTag(MerchantTag)) { Targets.Add(Actor); Merchants.Add(Actor); }
 	}
 	// Merchant name signs are untagged TextRenderActors standing on each merchant counter.
 	for (TActorIterator<ATextRenderActor> It(World); It; ++It)

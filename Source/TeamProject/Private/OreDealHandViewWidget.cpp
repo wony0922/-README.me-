@@ -23,7 +23,7 @@ namespace
 	constexpr float CardWidth = 150.0f;
 	constexpr float CardHeight = 210.0f;          // T_Card_* is 744 x 1039
 	constexpr float CardStep = 63.0f;             // 42% of the width: neighbours overlap the focus card by more than half
-	constexpr float ScreenMargin = 30.0f;
+	constexpr float HandViewScreenMargin = 30.0f;
 	constexpr int32 VisibleEachSide = 3;
 	constexpr float FocusScale = 1.12f;
 	constexpr float NeighbourScale = 0.86f;
@@ -31,7 +31,7 @@ namespace
 	constexpr float MinScale = 0.72f;
 	constexpr float MoveSpeed = 14.0f;
 	// Leaves room on the left for three earlier cards at their smallest visible scale.
-	constexpr float FocusCenterX = ScreenMargin + VisibleEachSide * CardStep + (NeighbourScale - ScaleFalloff * (VisibleEachSide - 1)) * CardWidth * 0.5f;
+	constexpr float FocusCenterX = HandViewScreenMargin + VisibleEachSide * CardStep + (NeighbourScale - ScaleFalloff * (VisibleEachSide - 1)) * CardWidth * 0.5f;
 
 	float ScaleForOffset(float Offset)
 	{
@@ -79,7 +79,7 @@ void UOreDealHandViewWidget::BuildRoot()
 		HintSlot->SetAnchors(FAnchors(0.0f, 1.0f));
 		HintSlot->SetAlignment(FVector2D(0.0f, 1.0f));
 		HintSlot->SetAutoSize(true);
-		HintSlot->SetPosition(FVector2D(ScreenMargin, -(ScreenMargin + CardHeight * FocusScale + 10.0f)));
+		HintSlot->SetPosition(FVector2D(HandViewScreenMargin, -(HandViewScreenMargin + CardHeight * FocusScale + 10.0f)));
 		HintSlot->SetZOrder(1000);
 	}
 }
@@ -156,7 +156,9 @@ void UOreDealHandViewWidget::RebuildCards()
 		Card->SetHorizontalAlignment(HAlign_Left);
 		Card->SetVerticalAlignment(VAlign_Top);
 		UTextBlock* Number = MakeHandLabel(WidgetTree, 14);
-		Number->SetText(FText::FromString(FString::Printf(TEXT("%02d"), Index + 1)));
+		static const TCHAR* ResourceNames[] = { TEXT("Rock"), TEXT("Coal"), TEXT("Copper"), TEXT("Iron"), TEXT("Silver"), TEXT("Gold"), TEXT("Diamond"), TEXT("Adamantium") };
+	const FString ResourceName = Resource >= 0 && Resource < UE_ARRAY_COUNT(ResourceNames) ? FString(ResourceNames[Resource]) : FString(TEXT("?"));
+		Number->SetText(FText::FromString(FString::Printf(TEXT("%s\n%02d"), *ResourceName, Index + 1)));
 		Card->SetContent(Number);
 		Card->SetRenderTransformPivot(FVector2D(0.5f, 1.0f));
 
@@ -187,7 +189,7 @@ void UOreDealHandViewWidget::UpdateLayout(float DeltaTime, bool bSnap)
 
 		if (UCanvasPanelSlot* CardSlot = Cast<UCanvasPanelSlot>(Card->Slot))
 		{
-			CardSlot->SetPosition(FVector2D(FocusCenterX + Offset * CardStep, -ScreenMargin));
+			CardSlot->SetPosition(FVector2D(FocusCenterX + Offset * CardStep, -HandViewScreenMargin));
 			// The focused card is on top; cards further from it sit further behind.
 			CardSlot->SetZOrder(100 - FMath::RoundToInt(FMath::Abs(Offset) * 10.0f));
 		}

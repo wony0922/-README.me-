@@ -8,6 +8,7 @@ class UMaterialInterface;
 class USceneComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
+class UTextRenderComponent;
 
 /** One floating card to draw this frame. */
 struct FOreDealCardDraw
@@ -37,6 +38,7 @@ private:
 	UPROPERTY(Transient) TArray<TObjectPtr<USceneComponent>> Pivots;
 	UPROPERTY(Transient) TArray<TObjectPtr<UStaticMeshComponent>> Faces;
 	UPROPERTY(Transient) TArray<TObjectPtr<UStaticMeshComponent>> Glows;
+	UPROPERTY(Transient) TArray<TObjectPtr<UTextRenderComponent>> ResourceLabels;
 	UPROPERTY(Transient) TArray<TObjectPtr<UMaterialInterface>> FaceMaterials;
 	UPROPERTY(Transient) TObjectPtr<UMaterialInterface> BackMaterial;
 	UPROPERTY(Transient) TObjectPtr<UMaterialInterface> GlowMaterial;

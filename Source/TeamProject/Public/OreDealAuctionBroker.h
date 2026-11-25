@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "OreDealCardInfo.h"
 #include "OreDealAuctionBroker.generated.h"
 
 class APawn;
@@ -77,6 +78,19 @@ public:
 	/** Number of players other than the turn player who have confirmed their offer. */
 	void GetBiddingProgress(int32& OutConfirmed, int32& OutTotal) const;
 
+	// Deck recycling and game end
+	void InitializeDeckIfNeeded();
+	int32 DrawCard();
+	void AddToDiscardPile(int32 Resource, int32 Count = 1);
+	void AddCardsToDiscardPile(const TArray<int32>& Cards);
+	bool ShuffleAllCardsAcrossPlayers();
+	void TriggerGameEnd();
+
+	int32 GetRemainingDeckCount() const { return RemainingDeckCount; }
+	int32 GetDeckDepletionCount() const { return DeckDepletionCount; }
+	int32 GetMaxDeckDepletions() const { return MaxDeckDepletions; }
+	UOreDealCardInfoAsset* GetCardInfoAsset() const { return CardInfoAsset; }
+
 	static AOreDealAuctionBroker* Find(const UObject* WorldContext);
 	static AActor* FindDeck(UWorld* World);
 	/** Reads BP_CardDeck.RevealedCards (the deck-top array), skipping empty (-1) entries. */
@@ -93,6 +107,18 @@ private:
 	UPROPERTY(Replicated) TArray<int32> LotIndices;
 	UPROPERTY(Replicated) TArray<FOreDealAuctionSeat> Seats;
 	UPROPERTY(Replicated) int32 Revision = 0;
+	UPROPERTY(Replicated) int32 RemainingDeckCount = 0;
+	UPROPERTY(Replicated) int32 DeckDepletionCount = 0;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OreDeal|Deck", meta = (AllowPrivateAccess = "true"))
+	int32 MaxDeckDepletions = 3;
+
+	/** 블루프린트 에디터에서 카드 종류·수량·가격을 설정하는 Data Asset */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OreDeal|Deck", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UOreDealCardInfoAsset> CardInfoAsset = nullptr;
+
+	UPROPERTY() TArray<int32> DrawDeck;
+	UPROPERTY() TArray<int32> DiscardPile;
+	bool bGameEnded = false;
 
 	FOreDealAuctionSeat* FindSeatMutable(const APlayerState* Player);
 	bool IsParticipant(const FOreDealAuctionSeat& Seat) const;

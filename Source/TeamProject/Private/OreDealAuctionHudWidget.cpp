@@ -130,7 +130,7 @@ void UOreDealAuctionHudWidget::BuildRoot()
 		StatusSlot->SetAnchors(FAnchors(0.5f, 0.0f));
 		StatusSlot->SetAlignment(FVector2D(0.5f, 0.0f));
 		StatusSlot->SetAutoSize(true);
-		StatusSlot->SetPosition(FVector2D(0.0f, 150.0f));
+		StatusSlot->SetPosition(FVector2D(0.0f, 230.0f));
 		StatusSlot->SetZOrder(10);
 	}
 
@@ -174,10 +174,10 @@ void UOreDealAuctionHudWidget::BuildRoot()
 	PendingText->SetVisibility(ESlateVisibility::Collapsed);
 	if (UCanvasPanelSlot* TextSlot = AddFramed(WidgetTree, RootCanvas, PendingText, NotificationBrush(), FMargin(24.0f, 10.0f, 30.0f, 12.0f)))
 	{
-		TextSlot->SetAnchors(FAnchors(1.0f, 1.0f));
-		TextSlot->SetAlignment(FVector2D(1.0f, 1.0f));
+		TextSlot->SetAnchors(FAnchors(1.0f, 0.0f));
+		TextSlot->SetAlignment(FVector2D(1.0f, 0.0f));
 		TextSlot->SetAutoSize(true);
-		TextSlot->SetPosition(FVector2D(-ScreenMargin, -(ScreenMargin + PendingCardHeight + 12.0f)));
+		TextSlot->SetPosition(FVector2D(-ScreenMargin, 230.0f));
 		TextSlot->SetZOrder(10);
 	}
 }
@@ -247,7 +247,10 @@ void UOreDealAuctionHudWidget::ApplyState(const FOreDealAuctionHudState& State)
 		Card->SetBrushColor(FLinearColor(Shade, Shade, Shade, 1.0f));
 		if (PickerMarks.IsValidIndex(Index) && PickerMarks[Index])
 		{
-			PickerMarks[Index]->SetText(FText::FromString(bSelected ? FString::Printf(TEXT("%02d  ✔ 선택"), Index + 1) : FString::Printf(TEXT("%02d"), Index + 1)));
+			static const TCHAR* ResourceNames[] = { TEXT("Rock"), TEXT("Coal"), TEXT("Copper"), TEXT("Iron"), TEXT("Silver"), TEXT("Gold"), TEXT("Diamond"), TEXT("Adamantium") };
+			const int32 Resource = State.PickerCards.IsValidIndex(Index) ? State.PickerCards[Index] : INDEX_NONE;
+			const FString Name = Resource >= 0 && Resource < UE_ARRAY_COUNT(ResourceNames) ? FString(ResourceNames[Resource]) : FString(TEXT("?"));
+			PickerMarks[Index]->SetText(FText::FromString(bSelected ? FString::Printf(TEXT("%s\n%02d ✔"), *Name, Index + 1) : FString::Printf(TEXT("%s\n%02d"), *Name, Index + 1)));
 			PickerMarks[Index]->SetColorAndOpacity(FSlateColor(bSelected ? GoldColor : TextColor));
 		}
 		Card->SetVisibility(ESlateVisibility::HitTestInvisible);
@@ -280,7 +283,10 @@ void UOreDealAuctionHudWidget::ApplyState(const FOreDealAuctionHudState& State)
 			const FString Controls = State.bPendingInputEnabled
 				? TEXT("A / D : 마차 선택   ·   Space : 배치")
 				: TEXT("거래가 모두 끝나면 배치할 수 있습니다");
-			PendingText->SetText(FText::FromString(FString::Printf(TEXT("가져온 카드  %d장 남음\n%s\n%s"), State.PendingCards.Num(), *WagonLine, *Controls)));
+			static const TCHAR* ResourceNames[] = { TEXT("Rock"), TEXT("Coal"), TEXT("Copper"), TEXT("Iron"), TEXT("Silver"), TEXT("Gold"), TEXT("Diamond"), TEXT("Adamantium") };
+			const int32 Resource = State.PendingCards[0];
+			const FString CardName = Resource >= 0 && Resource < UE_ARRAY_COUNT(ResourceNames) ? FString(ResourceNames[Resource]) : FString(TEXT("?"));
+			PendingText->SetText(FText::FromString(FString::Printf(TEXT("배치할 카드: %s  ·  %d장 남음\n%s\n%s"), *CardName, State.PendingCards.Num(), *WagonLine, *Controls)));
 		}
 	}
 	SyncFrame(StatusText);

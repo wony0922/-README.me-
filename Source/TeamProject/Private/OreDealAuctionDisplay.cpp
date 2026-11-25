@@ -2,6 +2,7 @@
 
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/TextRenderComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInterface.h"
 
@@ -80,10 +81,23 @@ void AOreDealAuctionDisplay::EnsureVisuals(int32 Count)
 		UStaticMeshComponent* Glow = MakePlane(GlowMaterial);
 		Glow->SetRelativeLocation(GlowOffset);
 		Glow->SetRelativeScale3D(GlowBaseScale);
+		UTextRenderComponent* Label = NewObject<UTextRenderComponent>(this);
+		Label->SetupAttachment(Pivot);
+		Label->SetRelativeRotation(CardRelativeRotation);
+		Label->SetRelativeScale3D(CardBaseScale);
+		Label->SetRelativeLocation(FVector(0.0f, 0.0f, 0.25f));
+		Label->SetHorizontalAlignment(EHTA_Center);
+		Label->SetVerticalAlignment(EVRTA_TextCenter);
+		Label->SetWorldSize(11.0f);
+		Label->SetTextRenderColor(FColor::White);
+		Label->SetCastShadow(false);
+		Label->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Label->RegisterComponent();
 
 		Pivots.Add(Pivot);
 		Faces.Add(Face);
 		Glows.Add(Glow);
+		ResourceLabels.Add(Label);
 		ShownResources.Add(INDEX_NONE - 1);
 	}
 }
@@ -96,11 +110,13 @@ void AOreDealAuctionDisplay::ShowCards(const TArray<FOreDealCardDraw>& Cards, co
 		USceneComponent* Pivot = Pivots[Index];
 		UStaticMeshComponent* Face = Faces[Index];
 		UStaticMeshComponent* Glow = Glows[Index];
-		if (!Pivot || !Face || !Glow) continue;
+		UTextRenderComponent* Label = ResourceLabels.IsValidIndex(Index) ? ResourceLabels[Index].Get() : nullptr;
+		if (!Pivot || !Face || !Glow || !Label) continue;
 		if (!Cards.IsValidIndex(Index))
 		{
 			Face->SetVisibility(false);
 			Glow->SetVisibility(false);
+			Label->SetVisibility(false);
 			continue;
 		}
 		const FOreDealCardDraw& Card = Cards[Index];
@@ -114,5 +130,8 @@ void AOreDealAuctionDisplay::ShowCards(const TArray<FOreDealCardDraw>& Cards, co
 		}
 		Face->SetVisibility(true);
 		Glow->SetVisibility(Card.bGlow);
+		static const TCHAR* ResourceNames[] = { TEXT("Rock"), TEXT("Coal"), TEXT("Copper"), TEXT("Iron"), TEXT("Silver"), TEXT("Gold"), TEXT("Diamond"), TEXT("Adamantium") };
+		Label->SetText(FText::FromString(Card.Resource >= 0 && Card.Resource < UE_ARRAY_COUNT(ResourceNames) ? ResourceNames[Card.Resource] : TEXT("?")));
+		Label->SetVisibility(true);
 	}
 }

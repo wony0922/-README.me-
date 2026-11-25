@@ -26,4 +26,8 @@ public:
 	/** Returns the localized HUD prompt for the current legacy turn stage. */
 	UFUNCTION(BlueprintPure, Category="Ore Deal|Turn")
 	static FText GetTurnStageLabel(AActor* CardDeck);
+
+	/** Plants a card onto a board with auto-matching, 1-card waste protection, sale/shatter settlement, and Niagara effects. */
+	UFUNCTION(BlueprintCallable, Category="Ore Deal|Turn")
+	static bool ExecutePlantCard(AActor* Board, APlayerState* Player, int32 Resource, int32 DesiredWagonIndex, int32& OutPlacedWagonIndex);
 };

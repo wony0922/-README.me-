@@ -24,7 +24,7 @@
 
 namespace
 {
-	const TCHAR* MarketResourceNames[] = { TEXT("Wood"), TEXT("Coal"), TEXT("Copper"), TEXT("Iron"), TEXT("Silver"), TEXT("Gold"), TEXT("Diamond"), TEXT("Adamantium") };
+	const TCHAR* MarketResourceNames[] = { TEXT("Rock"), TEXT("Coal"), TEXT("Copper"), TEXT("Iron"), TEXT("Silver"), TEXT("Gold"), TEXT("Diamond"), TEXT("Adamantium") };
 	FString MarketResourceName(int32 Resource)
 	{
 		return Resource >= 0 && Resource < UE_ARRAY_COUNT(MarketResourceNames) ? FString(MarketResourceNames[Resource]) : TEXT("Unknown");
@@ -381,9 +381,9 @@ void UOreDealInteractionWidget::BuildInterface()
 			UHorizontalBox* OfferRow = WidgetTree->ConstructWidget<UHorizontalBox>();
 			UHorizontalBox* SecretRow = WidgetTree->ConstructWidget<UHorizontalBox>();
 			PlayerBody->AddChildToVerticalBox(PlayerHeader);
-			PlayerBody->AddChildToVerticalBox(MakeLabel(WidgetTree, TEXT("공개 제안 구역"), 13));
+			PlayerBody->AddChildToVerticalBox(MakeLabel(WidgetTree, TEXT("거래할 카드"), 13));
 			PlayerBody->AddChildToVerticalBox(OfferRow);
-			PlayerBody->AddChildToVerticalBox(MakeLabel(WidgetTree, TEXT("비공개 손패 구역"), 13));
+			PlayerBody->AddChildToVerticalBox(MakeLabel(WidgetTree, TEXT("손패 확인"), 13));
 			PlayerBody->AddChildToVerticalBox(SecretRow);
 			PlayerPanel->SetContent(PlayerBody);
 			PlayerPanel->SetPadding(FMargin(8.0f));
@@ -414,7 +414,9 @@ void UOreDealInteractionWidget::BuildInterface()
 	MarketBody->AddChildToVerticalBox(MarketConfirmBody);
 	MarketPanel->SetContent(MarketBody);
 	MarketPanel->SetVisibility(ESlateVisibility::Collapsed);
-	SetCanvasRect(RootCanvas, MarketPanel, FVector2D::ZeroVector, FVector2D(1400.0f, 820.0f), FVector2D(0.5f, 0.5f), FVector2D(0.5f, 0.5f));
+
+	// 상점 UI 크기 설정하기
+	SetCanvasRect(RootCanvas, MarketPanel, FVector2D::ZeroVector, FVector2D(1200.0f, 820.0f), FVector2D(0.5f, 0.5f), FVector2D(0.5f, 0.5f));
 	MarketSlot = Cast<UCanvasPanelSlot>(MarketPanel->Slot);
 	for (int32 CardIndex = 0; CardIndex < 2; ++CardIndex)
 	{
@@ -536,7 +538,7 @@ void UOreDealInteractionWidget::SetMarketOpen(bool bOpen)
 		if (APlayerController* PC = GetOwningPlayer()) PC->GetViewportSize(Width, Height);
 		if (Width > 0 && Height > 0)
 		{
-			MarketSlot->SetSize(FVector2D(FMath::Min(Width - 32.0f, 1700.0f), FMath::Min(Height - 32.0f, 1000.0f)));
+			MarketSlot->SetSize(FVector2D(FMath::Min(Width - 100.0f, 1300.0f), FMath::Min(Height - 100.0f, 1000.0f)));
 			MarketSlot->SetPosition(FVector2D::ZeroVector);
 		}
 	}
@@ -814,7 +816,7 @@ void UOreDealInteractionWidget::RefreshHandCards(const TArray<int32>& Cards)
 	HandCardCanvas->ClearChildren();
 	HandCardBorders.Reset();
 	HandCardLabels.Reset();
-	static const TCHAR* Names[] = { TEXT("Wood"), TEXT("Coal"), TEXT("Copper"), TEXT("Iron"), TEXT("Silver"), TEXT("Gold"), TEXT("Diamond"), TEXT("Adamantium") };
+	static const TCHAR* Names[] = { TEXT("Rock"), TEXT("Coal"), TEXT("Copper"), TEXT("Iron"), TEXT("Silver"), TEXT("Gold"), TEXT("Diamond"), TEXT("Adamantium") };
 	const float CardWidth = 230.0f;
 	const float Step = CardWidth / 3.0f;
 	const float CanvasWidth = Cards.Num() > 0 ? Step * (Cards.Num() - 1) + CardWidth : CardWidth;

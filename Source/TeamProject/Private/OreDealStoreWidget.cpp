@@ -8,6 +8,8 @@
 #include "Engine/Texture2D.h"
 #include "Input/Events.h"
 #include "Input/Reply.h"
+#include "OreDealTablePlayerController.h"
+#include "GameFramework/PlayerState.h"
 #include "Styling/SlateBrush.h"
 
 namespace
@@ -135,6 +137,10 @@ namespace
 void UOreDealStoreWidget::NativeOnInitialized()
 {
 	Super::NativeOnInitialized();
+	if (const AOreDealTablePlayerController* StorePC = Cast<AOreDealTablePlayerController>(GetOwningPlayer()))
+		StoreItems = StorePC->GetStoreItems();
+	else
+		StoreItems.Reset();
 	if (!Root) Build();
 	SetVisibility(ESlateVisibility::Collapsed);
 }
@@ -256,9 +262,9 @@ void UOreDealStoreWidget::Build()
 	TabMark = AddImage(Panel, FocusTexture, 0.0f, 0.0f, 0.0f, 0.0f, 3, FocusMargin);
 	TabMark->SetColorAndOpacity(FLinearColor(1.0f, 1.0f, 1.0f, 0.55f));
 
-	// ---- Buy page: the 4 x 2 grid. Items come from OreDealStore::GetItems(), one per slot in order.
+	// ---- Buy page: the 4 x 2 grid. Items come from BP_PC_Table's ordered StoreItems array.
 	BuyPage = AddPage(10);
-	const TArray<FOreDealStoreItem>& Items = OreDealStore::GetItems();
+	const TArray<FOreDealStoreItem>& Items = StoreItems;
 	for (int32 Index = 0; Index < OreDealStore::SlotCount; ++Index)
 	{
 		const float X = SlotX[Index % OreDealStore::SlotColumns];
@@ -271,11 +277,12 @@ void UOreDealStoreWidget::Build()
 		}
 		const FOreDealStoreItem& Item = Items[Index];
 		AddImage(BuyPage, PaperTexture, X + (SlotW - 118.0f) * 0.5f, Y + (SlotH - 118.0f) * 0.5f, 118.0f, 118.0f, 1, PaperMargin);
-		AddImage(BuyPage, LoadTexture(*Item.IconPath), X + (SlotW - 96.0f) * 0.5f, Y + (SlotH - 96.0f) * 0.5f, 96.0f, 96.0f, 2);
+		UTexture2D* Icon = Item.Icon.LoadSynchronous();
+		AddImage(BuyPage, Icon, X + (SlotW - 96.0f) * 0.5f, Y + (SlotH - 96.0f) * 0.5f, 96.0f, 96.0f, 2);
 		SetLabel(AddText(BuyPage, 18, Ink(), X + TagOffsetX - 6.0f, Y + 221.0f, FVector2D(1.0f, 0.5f), 3), Item.Name);
 		AddImage(BuyPage, TagTexture, X + TagOffsetX, Y + TagOffsetY, TagW, TagH, 4);
 		UTextBlock* Cost = AddText(BuyPage, 20, Ink(), X + TagOffsetX + 43.0f, Y + TagOffsetY + 47.0f, FVector2D(0.0f, 0.5f), 5);
-		SetLabel(Cost, FString::FromInt(Item.Cost));
+		SetLabel(Cost, FString::Printf(TEXT("%d%s"), Item.Cost, Item.Currency == EOreDealStoreCurrency::Wood ? TEXT("W") : TEXT("G")));
 		BuyCostTexts.Add(Cost);
 	}
 
@@ -287,6 +294,7 @@ void UOreDealStoreWidget::Build()
 		SetLabel(SellTitles.Last(), FString::Printf(TEXT("마차 %d"), Index + 1));
 		SellFrames.Add(AddImage(SellPage, SlotTexture, 0.0f, 0.0f, SellFrameW, SellFrameH, 1, FMargin(0.16f)));
 		SellCards.Add(AddImage(SellPage, CardBackTexture, 0.0f, 0.0f, SellCardW, SellCardH, 2));
+		SellResourceTexts.Add(AddText(SellPage, 14, Cream(), 0.0f, 0.0f, FVector2D(0.5f, 0.5f), 5));
 		SellEmptyTexts.Add(AddText(SellPage, 16, Cream(), 0.0f, 0.0f, FVector2D(0.5f, 0.5f), 2));
 		SetLabel(SellEmptyTexts.Last(), TEXT("비어 있음"));
 		SellBadges.Add(AddImage(SellPage, PaperTexture, 0.0f, 0.0f, 66.0f, 40.0f, 3, PaperMargin));
@@ -307,13 +315,14 @@ void UOreDealStoreWidget::Build()
 	{
 		const float X = ContentCenterX + (Index == 0 ? -(ConfirmButtonW + 10.0f) : 10.0f);
 		AddImage(ConfirmLayer, ButtonTexture, X, ConfirmButtonY, ConfirmButtonW, ConfirmButtonH, 2, ButtonMargin);
-		SetLabel(AddText(ConfirmLayer, 18, Cream(), X + ConfirmButtonW * 0.5f, ConfirmButtonY + ConfirmButtonH * 0.5f, FVector2D(0.5f, 0.5f), 3), ConfirmLabels[Index]);
+		ConfirmButtonTexts.Add(AddText(ConfirmLayer, 18, Cream(), X + ConfirmButtonW * 0.5f, ConfirmButtonY + ConfirmButtonH * 0.5f, FVector2D(0.5f, 0.5f), 3));
+		SetLabel(ConfirmButtonTexts.Last(), ConfirmLabels[Index]);
 	}
 
 	// Gold plate text, notice line and the moving highlight.
 	GoldText = AddText(Panel, 42, Ink(), GoldTextX, GoldTextY, FVector2D(0.0f, 0.5f), 5);
 	GoldText->SetRenderTransformPivot(FVector2D(0.0f, 0.5f));
-	SetLabel(GoldText, TEXT("0g"));
+	SetLabel(GoldText, TEXT("0g · 0w"));
 	NoticeText = AddText(Panel, 15, Bad(), 318.0f, GoldTextY, FVector2D(0.5f, 0.5f), 5);
 	NoticeText->SetVisibility(ESlateVisibility::Collapsed);
 	FocusImage = AddImage(Panel, FocusTexture, 0.0f, 0.0f, 0.0f, 0.0f, 60, FocusMargin);
@@ -327,6 +336,7 @@ void UOreDealStoreWidget::SetStoreOpen(bool bOpen)
 	if (bStoreOpen == bOpen) return;
 	bStoreOpen = bOpen;
 	CancelPending();
+	BP_SetStoreOpen(bOpen);
 	if (bOpen)
 	{
 		// Always start on the sell tab with the first wagon highlighted.
@@ -346,6 +356,8 @@ void UOreDealStoreWidget::CancelPending()
 {
 	if (!bConfirmOpen && PendingItem.IsNone()) return;
 	bConfirmOpen = false;
+	bChoosingTarget = false;
+	PendingTarget = nullptr;
 	PendingItem = NAME_None;
 	ConfirmCursor = 0;
 	if (bStoreOpen) RefreshView();
@@ -355,11 +367,13 @@ void UOreDealStoreWidget::CancelPending()
 void UOreDealStoreWidget::ApplyState(const FOreDealStoreState& State)
 {
 	const bool bGoldChanged = !bHasState || State.Gold != Current.Gold;
+	const bool bWoodChanged = !bHasState || State.Wood != Current.Wood;
 	const bool bWagonsChanged = !bHasState || State.Wagons != Current.Wagons;
-	if (!bGoldChanged && !bWagonsChanged) return;
+	if (!bGoldChanged && !bWoodChanged && !bWagonsChanged) return;
+	if (GoldText && (bGoldChanged || bWoodChanged)) SetLabel(GoldText, FString::Printf(TEXT("%dg · %dw"), State.Gold, State.Wood));
 	if (bGoldChanged && GoldText)
 	{
-		SetLabel(GoldText, FString::Printf(TEXT("%dg"), State.Gold));
+		SetLabel(GoldText, FString::Printf(TEXT("%dg · %dw"), State.Gold, State.Wood));
 		if (bHasState)
 		{
 			// Immediate feedback: the number pops and flashes green (earned) or red (spent).
@@ -372,14 +386,16 @@ void UOreDealStoreWidget::ApplyState(const FOreDealStoreState& State)
 	// A purchase waiting for confirmation is dropped when it is no longer affordable.
 	if (bConfirmOpen)
 	{
-		const FOreDealStoreItem* Item = OreDealStore::FindItem(PendingItem);
-		if (!Item || Item->Cost > Current.Gold) { CancelPending(); return; }
+		const FOreDealStoreItem* Item = FindStoreItem(PendingItem);
+		const int32 Balance = Item && Item->Currency == EOreDealStoreCurrency::Wood ? Current.Wood : Current.Gold;
+		if (!Item || Item->Cost > Balance) { CancelPending(); return; }
 	}
 	RefreshView();
 }
 
 void UOreDealStoreWidget::ShowNotice(const FString& Message, bool bGood)
 {
+	BP_ShowStoreNotice(Message, bGood);
 	if (!NoticeText) return;
 	SetLabel(NoticeText, Message);
 	NoticeText->SetColorAndOpacity(FSlateColor(bGood ? Good() : Bad()));
@@ -427,8 +443,13 @@ int32 UOreDealStoreWidget::GetWagonCount() const
 int32 UOreDealStoreWidget::GetContentCount() const
 {
 	if (Tab == 0) return GetWagonCount();
-	if (Tab == 1) return OreDealStore::SlotCount;
+	if (Tab == 1) return FMath::Min(OreDealStore::SlotCount, StoreItems.Num());
 	return 0;
+}
+
+const FOreDealStoreItem* UOreDealStoreWidget::FindStoreItem(FName ItemId) const
+{
+	return StoreItems.FindByPredicate([ItemId](const FOreDealStoreItem& Item) { return Item.Id == ItemId; });
 }
 
 float UOreDealStoreWidget::GetWagonCenterX(int32 Index, int32 Count) const
@@ -463,7 +484,7 @@ void UOreDealStoreWidget::CollectHits(TArray<FHit>& OutHits) const
 	}
 	else if (Tab == 1)
 	{
-		for (int32 Index = 0; Index < OreDealStore::SlotCount; ++Index)
+		for (int32 Index = 0; Index < FMath::Min(OreDealStore::SlotCount, StoreItems.Num()); ++Index)
 			Add(SlotX[Index % OreDealStore::SlotColumns], SlotY[Index / OreDealStore::SlotColumns], SlotW, SlotH, EHit::Content, Index);
 	}
 }
@@ -496,7 +517,12 @@ void UOreDealStoreWidget::MoveFocus(int32 DX, int32 DY)
 {
 	if (bConfirmOpen)
 	{
-		if (DX != 0) ConfirmCursor = DX > 0 ? 1 : 0;
+		if (bChoosingTarget)
+		{
+			if (PendingItem == TEXT("oil") && DY != 0) StepTarget(DY);
+			else if (DX != 0) StepTarget(DX);
+		}
+		else if (DX != 0) ConfirmCursor = DX > 0 ? 1 : 0;
 		return;
 	}
 	if (Zone == EZone::Tabs)
@@ -532,8 +558,20 @@ void UOreDealStoreWidget::Activate()
 	{
 		const FName Item = PendingItem;
 		const bool bBuy = ConfirmCursor == 0;
+		if (bBuy && bChoosingTarget)
+		{
+			bChoosingTarget = false;
+			const APlayerState* Target = PendingTarget.Get();
+			const int32 WagonIndex = TargetWagonCursor;
+			bConfirmOpen = false;
+			PendingItem = NAME_None;
+			PendingTarget = nullptr;
+			OnBuyRequested.ExecuteIfBound(Item, const_cast<APlayerState*>(Target), WagonIndex);
+			RefreshView();
+			return;
+		}
 		CancelPending();
-		if (bBuy) OnBuyRequested.ExecuteIfBound(Item);
+		if (bBuy) OnBuyRequested.ExecuteIfBound(Item, nullptr, INDEX_NONE);
 		return;
 	}
 	if (Zone == EZone::Tabs)
@@ -552,13 +590,87 @@ void UOreDealStoreWidget::Activate()
 	}
 	if (Tab == 1)
 	{
-		const TArray<FOreDealStoreItem>& Items = OreDealStore::GetItems();
+		const TArray<FOreDealStoreItem>& Items = StoreItems;
 		if (!Items.IsValidIndex(Cursor)) return;
-		if (Items[Cursor].Cost > Current.Gold) { ShowNotice(TEXT("골드가 부족합니다"), false); return; }
-		PendingItem = Items[Cursor].Id;
+		const FOreDealStoreItem& Item = Items[Cursor];
+		const int32 Balance = Item.Currency == EOreDealStoreCurrency::Wood ? Current.Wood : Current.Gold;
+		if (Item.Cost > Balance) { ShowNotice(Item.Currency == EOreDealStoreCurrency::Wood ? TEXT("나무가 부족합니다") : TEXT("골드가 부족합니다"), false); return; }
+		PendingItem = Item.Id;
 		ConfirmCursor = 0;
 		bConfirmOpen = true;
+		bChoosingTarget = Item.Id == TEXT("oil") || Item.Id == TEXT("fix");
+		TargetWagonCursor = 0;
+		PendingTarget = nullptr;
+		if (Item.Id == TEXT("oil"))
+		{
+			if (Current.OtherPlayers.IsEmpty()) { bConfirmOpen = false; bChoosingTarget = false; ShowNotice(TEXT("대상이 될 상대가 없습니다"), false); return; }
+			TargetCursor = 0;
+			PendingTarget = Current.OtherPlayers[0];
+		}
+		if (Item.Id == TEXT("fix"))
+		{
+			const int32 FirstBroken = Current.Wagons.IndexOfByPredicate([](const FOreDealStoreWagonView& W) { return W.bBroken; });
+			if (FirstBroken == INDEX_NONE) { bConfirmOpen = false; bChoosingTarget = false; ShowNotice(TEXT("수리할 고장난 마차가 없습니다"), false); return; }
+			TargetWagonCursor = FirstBroken;
+		}
 	}
+}
+
+void UOreDealStoreWidget::StepTarget(int32 Delta)
+{
+	if (PendingItem == TEXT("oil"))
+	{
+		if (Delta == 0 || Current.OtherPlayers.IsEmpty()) return;
+		TargetCursor = (TargetCursor + Delta + Current.OtherPlayers.Num()) % Current.OtherPlayers.Num();
+		PendingTarget = Current.OtherPlayers[TargetCursor];
+		const int32 Count = Current.OtherPlayerWagonCounts.IsValidIndex(TargetCursor) ? Current.OtherPlayerWagonCounts[TargetCursor] : 2;
+		TargetWagonCursor = FMath::Clamp(TargetWagonCursor, 0, FMath::Max(0, Count - 1));
+	}
+	else if (PendingItem == TEXT("fix"))
+	{
+		TArray<int32> Broken;
+		for (int32 I = 0; I < Current.Wagons.Num(); ++I) if (Current.Wagons[I].bBroken) Broken.Add(I);
+		if (Broken.IsEmpty()) return;
+		const int32 CurrentIndex = Broken.IndexOfByKey(TargetWagonCursor);
+		TargetWagonCursor = Broken[(CurrentIndex + Delta + Broken.Num()) % Broken.Num()];
+	}
+}
+
+void UOreDealStoreWidget::SelectStoreTab(int32 NewTab)
+{
+	SelectTab(NewTab);
+	Zone = EZone::Content;
+	Cursor = FMath::Clamp(Cursor, 0, FMath::Max(0, GetContentCount() - 1));
+	RefreshView();
+}
+
+void UOreDealStoreWidget::ActivateStoreEntry(int32 Index)
+{
+	if (bConfirmOpen || Index < 0 || Index >= GetContentCount()) return;
+	Zone = EZone::Content;
+	Cursor = Index;
+	Activate();
+	RefreshView();
+}
+
+void UOreDealStoreWidget::ChooseStoreConfirmation(int32 Index)
+{
+	if (!bConfirmOpen) return;
+	ConfirmCursor = FMath::Clamp(Index, 0, 1);
+	RefreshView();
+}
+
+void UOreDealStoreWidget::ConfirmStorePurchase(bool bConfirm)
+{
+	if (!bConfirmOpen) return;
+	ConfirmCursor = bConfirm ? 0 : 1;
+	Activate();
+	RefreshView();
+}
+
+void UOreDealStoreWidget::CloseStoreFromBlueprint()
+{
+	OnCloseRequested.ExecuteIfBound();
 }
 
 void UOreDealStoreWidget::HandleKey(const FKey& Key, bool bRepeat)
@@ -621,7 +733,11 @@ FReply UOreDealStoreWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry,
 
 void UOreDealStoreWidget::RefreshView()
 {
-	if (!Panel) return;
+	if (!Panel)
+	{
+		BP_RefreshStore(Current.Gold, Current.Wagons, StoreItems, Tab, Cursor, bConfirmOpen, PendingItem);
+		return;
+	}
 
 	for (int32 Index = 0; Index < TabImages.Num(); ++Index)
 		if (TabImages[Index]) TabImages[Index]->SetColorAndOpacity(Index == Tab ? FLinearColor::White : FLinearColor(0.62f, 0.62f, 0.62f, 1.0f));
@@ -644,6 +760,7 @@ void UOreDealStoreWidget::RefreshView()
 			if (!bShown)
 			{
 				SetShown(SellCards[Index], false);
+				SetShown(SellResourceTexts[Index], false);
 				SetShown(SellEmptyTexts[Index], false);
 				SetShown(SellBadges[Index], false);
 				SetShown(SellCountTexts[Index], false);
@@ -664,6 +781,7 @@ void UOreDealStoreWidget::RefreshView()
 			SetPoint(SellNotes[Index], CenterX, SellButtonY + SellButtonH + 8.0f);
 
 			SetShown(SellCards[Index], bLoaded);
+			SetShown(SellResourceTexts[Index], bLoaded);
 			SetShown(SellEmptyTexts[Index], !bLoaded);
 			SetShown(SellBadges[Index], bLoaded);
 			SetShown(SellCountTexts[Index], bLoaded);
@@ -672,6 +790,9 @@ void UOreDealStoreWidget::RefreshView()
 				FSlateBrush CardBrush;
 				CardBrush.SetResourceObject(CardTextureFor(Wagon.Resource));
 				SellCards[Index]->SetBrush(CardBrush);
+				static const TCHAR* ResourceNames[] = { TEXT("Rock"), TEXT("Coal"), TEXT("Copper"), TEXT("Iron"), TEXT("Silver"), TEXT("Gold"), TEXT("Diamond"), TEXT("Adamantium") };
+				SetLabel(SellResourceTexts[Index], Wagon.Resource >= 0 && Wagon.Resource < UE_ARRAY_COUNT(ResourceNames) ? FString(ResourceNames[Wagon.Resource]) : TEXT("?"));
+				SetPoint(SellResourceTexts[Index], CenterX, SellFrameY + SellFrameH * 0.5f);
 				SetLabel(SellCountTexts[Index], FString::Printf(TEXT("x %d"), Wagon.Count));
 			}
 			SetLabel(SellButtonTexts[Index], bLoaded ? FString::Printf(TEXT("판매  +%dg"), Wagon.Reward) : FString(TEXT("판매")));
@@ -683,18 +804,39 @@ void UOreDealStoreWidget::RefreshView()
 	}
 	else if (Tab == 1)
 	{
-		const TArray<FOreDealStoreItem>& Items = OreDealStore::GetItems();
+		const TArray<FOreDealStoreItem>& Items = StoreItems;
 		for (int32 Index = 0; Index < BuyCostTexts.Num(); ++Index)
 			if (BuyCostTexts[Index] && Items.IsValidIndex(Index))
-				BuyCostTexts[Index]->SetColorAndOpacity(FSlateColor(Items[Index].Cost > Current.Gold ? Bad() : Ink()));
+				BuyCostTexts[Index]->SetColorAndOpacity(FSlateColor(Items[Index].Cost > (Items[Index].Currency == EOreDealStoreCurrency::Wood ? Current.Wood : Current.Gold) ? Bad() : Ink()));
 	}
 
 	if (bConfirmOpen)
 	{
-		if (const FOreDealStoreItem* Item = OreDealStore::FindItem(PendingItem))
+		if (const FOreDealStoreItem* Item = FindStoreItem(PendingItem))
 		{
-			SetLabel(ConfirmTitle, FString::Printf(TEXT("%s 구매"), *Item->Name));
-			SetLabel(ConfirmBody, FString::Printf(TEXT("%d골드를 사용합니다  (보유 %dg → %dg)"), Item->Cost, Current.Gold, Current.Gold - Item->Cost));
+			if (bChoosingTarget)
+			{
+				SetLabel(ConfirmTitle, FString::Printf(TEXT("%s 대상 선택"), *Item->Name));
+				if (Item->Id == TEXT("oil"))
+				{
+					const int32 Count = Current.OtherPlayerWagonCounts.IsValidIndex(TargetCursor) ? Current.OtherPlayerWagonCounts[TargetCursor] : 2;
+					SetLabel(ConfirmBody, FString::Printf(TEXT("상대: %s   ·   마차 %d/%d  (↑↓ 상대, ←→ 마차)"), PendingTarget ? *PendingTarget->GetPlayerName() : TEXT("?"), TargetWagonCursor + 1, Count));
+				}
+				else SetLabel(ConfirmBody, FString::Printf(TEXT("내 고장난 마차 %d 선택  (←→ 변경)"), TargetWagonCursor + 1));
+				SetLabel(ConfirmButtonTexts[0], TEXT("사용"));
+			}
+			else
+			{
+				SetLabel(ConfirmTitle, FString::Printf(TEXT("%s 구매"), *Item->Name));
+				const bool bWood = Item->Currency == EOreDealStoreCurrency::Wood;
+				const int32 Balance = bWood ? Current.Wood : Current.Gold;
+				if (bWood)
+					SetLabel(ConfirmBody, FString::Printf(TEXT("나무 %d개를 사용합니다  (보유 %d → %d)"), Item->Cost, Balance, Balance - Item->Cost));
+				else
+					SetLabel(ConfirmBody, FString::Printf(TEXT("%d골드를 사용합니다  (보유 %dg → %dg)"), Item->Cost, Balance, Balance - Item->Cost));
+				SetLabel(ConfirmButtonTexts[0], TEXT("구매"));
+			}
+			SetLabel(ConfirmButtonTexts[1], TEXT("취소"));
 		}
 	}
 
@@ -706,4 +848,5 @@ void UOreDealStoreWidget::RefreshView()
 	const FHit* Focus = Hits.FindByPredicate([WantedKind, WantedIndex](const FHit& Hit) { return Hit.Kind == WantedKind && Hit.Index == WantedIndex; });
 	SetShown(FocusImage, Focus != nullptr);
 	if (Focus) SetRect(FocusImage, Focus->X - FocusPad, Focus->Y - FocusPad, Focus->W + FocusPad * 2.0f, Focus->H + FocusPad * 2.0f);
+	BP_RefreshStore(Current.Gold, Current.Wagons, StoreItems, Tab, Cursor, bConfirmOpen, PendingItem);
 }

@@ -11,15 +11,19 @@ class UImage;
 class UTextBlock;
 class UTexture2D;
 class UWidget;
+class APlayerState;
 
 /** Everything the store shows for the local player. Pushed by UOreDealStoreComponent while the store is open. */
 struct FOreDealStoreState
 {
 	int32 Gold = 0;
+	int32 Wood = 0;
 	TArray<FOreDealStoreWagonView> Wagons;
+	TArray<TObjectPtr<APlayerState>> OtherPlayers;
+	TArray<int32> OtherPlayerWagonCounts;
 };
 
-DECLARE_DELEGATE_OneParam(FOreDealStoreBuyRequest, FName);
+DECLARE_DELEGATE_ThreeParams(FOreDealStoreBuyRequest, FName, APlayerState*, int32);
 DECLARE_DELEGATE_OneParam(FOreDealStoreSellRequest, int32);
 DECLARE_DELEGATE(FOreDealStoreCloseRequest);
 
@@ -28,7 +32,7 @@ DECLARE_DELEGATE(FOreDealStoreCloseRequest);
  * on the left (sell / buy / unused), a 4x2 slot grid on the right and the gold plate at the bottom.
  * Mouse: every icon, slot and button is clickable. Keyboard: arrows move the highlight, Space activates.
  */
-UCLASS()
+UCLASS(BlueprintType, Blueprintable)
 class TEAMPROJECT_API UOreDealStoreWidget : public UUserWidget
 {
 	GENERATED_BODY()
@@ -47,6 +51,24 @@ public:
 	void ShowNotice(const FString& Message, bool bGood);
 	/** Drops a purchase that is waiting for confirmation. Called when the store closes for any reason. */
 	void CancelPending();
+
+	UFUNCTION(BlueprintCallable, Category="Ore Deal|Store")
+	void SelectStoreTab(int32 NewTab);
+	UFUNCTION(BlueprintCallable, Category="Ore Deal|Store")
+	void ActivateStoreEntry(int32 Index);
+	UFUNCTION(BlueprintCallable, Category="Ore Deal|Store")
+	void ChooseStoreConfirmation(int32 Index);
+	UFUNCTION(BlueprintCallable, Category="Ore Deal|Store")
+	void ConfirmStorePurchase(bool bConfirm);
+	UFUNCTION(BlueprintCallable, Category="Ore Deal|Store")
+	void CloseStoreFromBlueprint();
+
+	UFUNCTION(BlueprintImplementableEvent, Category="Ore Deal|Store")
+	void BP_RefreshStore(int32 Gold, const TArray<FOreDealStoreWagonView>& Wagons, const TArray<FOreDealStoreItem>& Items, int32 ActiveTab, int32 SelectedIndex, bool bConfirmationOpen, FName PendingItemId);
+	UFUNCTION(BlueprintImplementableEvent, Category="Ore Deal|Store")
+	void BP_SetStoreOpen(bool bOpen);
+	UFUNCTION(BlueprintImplementableEvent, Category="Ore Deal|Store")
+	void BP_ShowStoreNotice(const FString& Message, bool bGood);
 
 	FOreDealStoreBuyRequest OnBuyRequested;
 	FOreDealStoreSellRequest OnSellRequested;
@@ -80,6 +102,7 @@ private:
 	UPROPERTY(Transient) TArray<TObjectPtr<UTextBlock>> SellTitles;
 	UPROPERTY(Transient) TArray<TObjectPtr<UImage>> SellFrames;
 	UPROPERTY(Transient) TArray<TObjectPtr<UImage>> SellCards;
+	UPROPERTY(Transient) TArray<TObjectPtr<UTextBlock>> SellResourceTexts;
 	UPROPERTY(Transient) TArray<TObjectPtr<UTextBlock>> SellEmptyTexts;
 	UPROPERTY(Transient) TArray<TObjectPtr<UImage>> SellBadges;
 	UPROPERTY(Transient) TArray<TObjectPtr<UTextBlock>> SellCountTexts;
@@ -88,8 +111,10 @@ private:
 	UPROPERTY(Transient) TArray<TObjectPtr<UTextBlock>> SellNotes;
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> ConfirmTitle;
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> ConfirmBody;
+	UPROPERTY(Transient) TArray<TObjectPtr<UTextBlock>> ConfirmButtonTexts;
 	UPROPERTY(Transient) TArray<TObjectPtr<UTexture2D>> CardTextures;
 	UPROPERTY(Transient) TObjectPtr<UTexture2D> CardBackTexture;
+	UPROPERTY(Transient) TArray<FOreDealStoreItem> StoreItems;
 	/** Keeps every UI texture alive while the widget exists. */
 	UPROPERTY(Transient) TArray<TObjectPtr<UTexture2D>> LoadedTextures;
 
@@ -101,7 +126,11 @@ private:
 	int32 TabCursor = 0;
 	int32 Cursor = 0;
 	bool bConfirmOpen = false;
+	bool bChoosingTarget = false;
 	int32 ConfirmCursor = 0;     // 0 = buy, 1 = cancel
+	int32 TargetCursor = 0;
+	int32 TargetWagonCursor = 0;
+	TObjectPtr<APlayerState> PendingTarget;
 	FName PendingItem;
 	float GoldPulse = 0.0f;
 	bool bGoldGained = true;
@@ -125,5 +154,7 @@ private:
 	void MoveFocus(int32 DX, int32 DY);
 	void Activate();
 	void RefreshView();
+	const FOreDealStoreItem* FindStoreItem(FName ItemId) const;
+	void StepTarget(int32 Delta);
 	UTexture2D* CardTextureFor(int32 Resource) const;
 };
