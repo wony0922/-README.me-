@@ -5,10 +5,12 @@
 #include "OreDealAuctionDisplay.generated.h"
 
 class UMaterialInterface;
+class UMaterialInstanceDynamic;
 class USceneComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
 class UTextRenderComponent;
+class UTexture2D;
 
 /** One floating card to draw this frame. */
 struct FOreDealCardDraw
@@ -40,6 +42,8 @@ private:
 	UPROPERTY(Transient) TArray<TObjectPtr<UStaticMeshComponent>> Glows;
 	UPROPERTY(Transient) TArray<TObjectPtr<UTextRenderComponent>> ResourceLabels;
 	UPROPERTY(Transient) TArray<TObjectPtr<UMaterialInterface>> FaceMaterials;
+	UPROPERTY(Transient) TArray<TObjectPtr<UTexture2D>> FaceTextures;
+	UPROPERTY(Transient) TObjectPtr<UMaterialInterface> CardFaceMaterial;
 	UPROPERTY(Transient) TObjectPtr<UMaterialInterface> BackMaterial;
 	UPROPERTY(Transient) TObjectPtr<UMaterialInterface> GlowMaterial;
 	UPROPERTY(Transient) TObjectPtr<UStaticMesh> PlaneMesh;
@@ -48,5 +52,5 @@ private:
 
 	void LoadAssets();
 	void EnsureVisuals(int32 Count);
-	UMaterialInterface* MaterialFor(int32 Resource) const;
+	UMaterialInterface* MaterialFor(int32 Resource);
 };

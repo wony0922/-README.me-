@@ -14,7 +14,9 @@
 namespace
 {
 	constexpr float WagonRefreshInterval = 0.1f;
-	constexpr int32 StoreZOrder = 32500; // above the interaction HUD (32000) and the auction HUD (30500)
+	// The persistent inventory HUD is at 33000. The modal store must be above it so even
+	// transparent HUD regions cannot sit in front of the store's hit targets.
+	constexpr int32 StoreZOrder = 34000;
 
 	FIntProperty* FindPlayerInt(const APlayerState* Player, FName Name)
 	{
@@ -77,6 +79,12 @@ int32 UOreDealStoreComponent::ReadWood() const
 void UOreDealStoreComponent::ToggleStore()
 {
 	SetStoreOpen(!bStoreOpen);
+}
+
+void UOreDealStoreComponent::OpenInventoryTab()
+{
+	if (!bStoreOpen) SetStoreOpen(true);
+	if (bStoreOpen && Widget) Widget->OpenInventoryTab();
 }
 
 void UOreDealStoreComponent::SetStoreOpen(bool bOpen)
@@ -159,18 +167,31 @@ void UOreDealStoreComponent::PushState(bool bRefreshWagons)
 	State.Gold = Gold;
 	State.Wood = Wood;
 	if (const AOreDealTablePlayerController* TablePC = Cast<AOreDealTablePlayerController>(GetOwnerController()))
+	{
 		TablePC->GetStoreWagons(State.Wagons);
+		TablePC->GetStoreInventoryCounts(State.ItemCounts);
+	}
 	if (UWorld* World = GetWorld())
 		if (AGameStateBase* GS = World->GetGameState())
 			for (APlayerState* Other : GS->PlayerArray)
-				if (Other && Other != GetOwnerPlayerState())
+				if (Other)
 				{
-					State.OtherPlayers.Add(Other);
+					FOreDealStoreState::FPlayerStatus& Status = State.PlayerStatuses.AddDefaulted_GetRef();
+					Status.Name = Other->GetPlayerName();
+					if (const FIntProperty* GoldProp = FindPlayerInt(Other, TEXT("Gold"))) Status.Gold = GoldProp->GetPropertyValue_InContainer(Other);
+					if (const FIntProperty* WoodProp = FindPlayerInt(Other, TEXT("Wood"))) Status.Wood = WoodProp->GetPropertyValue_InContainer(Other);
+					for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+						if (const AOreDealTablePlayerController* OtherPC = Cast<AOreDealTablePlayerController>(It->Get()); OtherPC && OtherPC->PlayerState == Other)
+							Status.bHasAxe = OtherPC->bHasWoodAxe;
+					if (Other != GetOwnerPlayerState()) State.OtherPlayers.Add(Other);
 					int32 Count = 2;
 					if (AActor* Board = AOreDealAuctionBroker::FindBoardFor(World, Other->GetPawn()))
 						if (const FArrayProperty* TypesProp = FindFProperty<FArrayProperty>(Board->GetClass(), TEXT("wagonTypes")))
+						{
 							Count = FMath::Clamp(FScriptArrayHelper(TypesProp, TypesProp->ContainerPtrToValuePtr<void>(Board)).Num(), 1, 3);
-					State.OtherPlayerWagonCounts.Add(Count);
+							Status.bHasWagonSlot = Count > 2;
+						}
+					if (Other != GetOwnerPlayerState()) State.OtherPlayerWagonCounts.Add(Count);
 				}
 	Widget->ApplyState(State);
 }
@@ -217,7 +238,6 @@ void UOreDealStoreComponent::ServerBuyItem_Implementation(FName ItemId, APlayerS
 	FIntProperty* CostProperty = FindPlayerInt(Player, Item->Currency == EOreDealStoreCurrency::Wood ? TEXT("Wood") : TEXT("Gold"));
 	if (!CostProperty || CostProperty->GetPropertyValue_InContainer(Player) < Item->Cost)
 	{
-		ClientStoreNotice(Item->Currency == EOreDealStoreCurrency::Wood ? TEXT("나무가 부족합니다") : TEXT("골드가 부족합니다"), false);
 		return;
 	}
 	const int32 Balance = CostProperty->GetPropertyValue_InContainer(Player);
@@ -265,9 +285,21 @@ void UOreDealStoreComponent::ServerBuyItem_Implementation(FName ItemId, APlayerS
 	}
 	else
 	{
-		if (!GrantItem(*Item, Player)) return;
+		if (!GrantItem(*Item, Player))
+		{
+			ClientStoreNotice(ItemId == TEXT("bottle") ? TEXT("병 생성에 실패했습니다. 마차 주변을 확인하거나 다시 시도해 주세요") : FString::Printf(TEXT("%s 지급에 실패했습니다"), *Item->Name), false);
+			return;
+		}
 		CostProperty->SetPropertyValue_InContainer(Player, Balance - Item->Cost);
 		ClientStoreNotice(FString::Printf(TEXT("%s 구매 완료"), *Item->Name), true);
+	}
+	if (UWorld* World = GetWorld())
+	{
+		const FString PlayerName = Player->GetPlayerName();
+		const FString Message = FString::Printf(TEXT("@@ %s ** %s 사용(구매)!"), *PlayerName, *Item->Name);
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+			if (AOreDealTablePlayerController* Recipient = Cast<AOreDealTablePlayerController>(It->Get()))
+				Recipient->ClientReceiveChat(TEXT("상점"), Message);
 	}
 	Player->ForceNetUpdate();
 }

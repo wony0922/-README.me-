@@ -7,6 +7,7 @@
 #include "OreDealStoreWidget.generated.h"
 
 class UCanvasPanel;
+class UButton;
 class UImage;
 class UTextBlock;
 class UTexture2D;
@@ -19,8 +20,20 @@ struct FOreDealStoreState
 	int32 Gold = 0;
 	int32 Wood = 0;
 	TArray<FOreDealStoreWagonView> Wagons;
+	/** Current stock for each item, aligned to BP_PC_Table.StoreItems. */
+	TArray<int32> ItemCounts;
 	TArray<TObjectPtr<APlayerState>> OtherPlayers;
 	TArray<int32> OtherPlayerWagonCounts;
+	struct FPlayerStatus
+	{
+		FString Name;
+		int32 Gold = 0;
+		int32 Wood = 0;
+		bool bHasAxe = false;
+		bool bHasWagonSlot = false;
+		bool operator==(const FPlayerStatus& Other) const { return Name == Other.Name && Gold == Other.Gold && Wood == Other.Wood && bHasAxe == Other.bHasAxe && bHasWagonSlot == Other.bHasWagonSlot; }
+	};
+	TArray<FPlayerStatus> PlayerStatuses;
 };
 
 DECLARE_DELEGATE_ThreeParams(FOreDealStoreBuyRequest, FName, APlayerState*, int32);
@@ -44,7 +57,10 @@ public:
 	virtual FReply NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 
 	void SetStoreOpen(bool bOpen);
+	void OpenInventoryTab();
 	bool IsStoreOpen() const { return bStoreOpen; }
+	/** Direct mouse route used while the viewport is in captured gameplay mode. */
+	void HandleMouseClickAtScreenPosition(const FVector2D& AbsoluteScreenPosition);
 	void ApplyState(const FOreDealStoreState& State);
 	/** Arrow keys / Space / Escape. bRepeat is true for key-repeat events (only movement repeats). */
 	void HandleKey(const FKey& Key, bool bRepeat);
@@ -62,6 +78,7 @@ public:
 	void ConfirmStorePurchase(bool bConfirm);
 	UFUNCTION(BlueprintCallable, Category="Ore Deal|Store")
 	void CloseStoreFromBlueprint();
+	UFUNCTION() void OnStoreInputRouterClicked();
 
 	UFUNCTION(BlueprintImplementableEvent, Category="Ore Deal|Store")
 	void BP_RefreshStore(int32 Gold, const TArray<FOreDealStoreWagonView>& Wagons, const TArray<FOreDealStoreItem>& Items, int32 ActiveTab, int32 SelectedIndex, bool bConfirmationOpen, FName PendingItemId);
@@ -89,16 +106,28 @@ private:
 	};
 
 	UPROPERTY(Transient) TObjectPtr<UCanvasPanel> Root;
+	UPROPERTY(Transient) TObjectPtr<UButton> InputRouter;
 	UPROPERTY(Transient) TObjectPtr<UCanvasPanel> Panel;
 	UPROPERTY(Transient) TObjectPtr<UCanvasPanel> BuyPage;
+	UPROPERTY(Transient) TObjectPtr<UCanvasPanel> InventoryPage;
 	UPROPERTY(Transient) TObjectPtr<UCanvasPanel> SellPage;
 	UPROPERTY(Transient) TObjectPtr<UCanvasPanel> ConfirmLayer;
 	UPROPERTY(Transient) TArray<TObjectPtr<UImage>> TabImages;
+	UPROPERTY(Transient) TArray<TObjectPtr<UTextBlock>> TabLabels;
 	UPROPERTY(Transient) TObjectPtr<UImage> TabMark;
 	UPROPERTY(Transient) TObjectPtr<UImage> FocusImage;
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> GoldText;
+	UPROPERTY(Transient) TObjectPtr<UTextBlock> WoodText;
+	UPROPERTY(Transient) TObjectPtr<UImage> GoldIcon;
+	UPROPERTY(Transient) TObjectPtr<UImage> WoodIcon;
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> NoticeText;
 	UPROPERTY(Transient) TArray<TObjectPtr<UTextBlock>> BuyCostTexts;
+	UPROPERTY(Transient) TArray<TObjectPtr<UImage>> BuyCostIcons;
+	UPROPERTY(Transient) TArray<TObjectPtr<UTextBlock>> PlayerNameTexts;
+	UPROPERTY(Transient) TArray<TObjectPtr<UTextBlock>> PlayerGoldTexts;
+	UPROPERTY(Transient) TArray<TObjectPtr<UTextBlock>> PlayerWoodTexts;
+	UPROPERTY(Transient) TArray<TObjectPtr<UTextBlock>> PlayerAxeTexts;
+	UPROPERTY(Transient) TArray<TObjectPtr<UTextBlock>> PlayerWagonTexts;
 	UPROPERTY(Transient) TArray<TObjectPtr<UTextBlock>> SellTitles;
 	UPROPERTY(Transient) TArray<TObjectPtr<UImage>> SellFrames;
 	UPROPERTY(Transient) TArray<TObjectPtr<UImage>> SellCards;
@@ -121,7 +150,7 @@ private:
 	FOreDealStoreState Current;
 	bool bStoreOpen = false;
 	bool bHasState = false;
-	int32 Tab = 0;               // 0 = sell, 1 = buy, 2 = unused
+	int32 Tab = 0;               // 0 = sell, 1 = buy, 2 = player status
 	EZone Zone = EZone::Content;
 	int32 TabCursor = 0;
 	int32 Cursor = 0;
@@ -150,6 +179,7 @@ private:
 	float GetWagonCenterX(int32 Index, int32 Count) const;
 	void CollectHits(TArray<FHit>& OutHits) const;
 	bool FindHit(const FPointerEvent& MouseEvent, FHit& OutHit) const;
+	bool FindHitAtScreenPosition(const FVector2D& AbsoluteScreenPosition, FHit& OutHit) const;
 	void SelectTab(int32 NewTab);
 	void MoveFocus(int32 DX, int32 DY);
 	void Activate();

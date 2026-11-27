@@ -5,16 +5,21 @@
 #include "Components/TextRenderComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Engine/Texture2D.h"
 
 namespace
 {
-	// Same order as BP_CardBoard.FloatMats (unlit floating card faces).
-	const TCHAR* FloatMaterialPaths[] = {
-		TEXT("/Game/MaterialTraders/Cards/MI_CardFloat_Stone.MI_CardFloat_Stone"),
-		TEXT("/Game/MaterialTraders/Cards/MI_CardFloat_Coal.MI_CardFloat_Coal"),
-		TEXT("/Game/MaterialTraders/Cards/MI_CardFloat_Gold.MI_CardFloat_Gold"),
-		TEXT("/Game/MaterialTraders/Cards/MI_CardFloat_Iron.MI_CardFloat_Iron"),
-		TEXT("/Game/MaterialTraders/Cards/MI_CardFloat_Diamond.MI_CardFloat_Diamond"),
+	// Eight market-card faces in BP_TradeManager order.
+	const TCHAR* AuctionCardTexturePaths[] = {
+		TEXT("/Game/MaterialTraders/Cards/rock.rock"),
+		TEXT("/Game/MaterialTraders/Cards/coal.coal"),
+		TEXT("/Game/MaterialTraders/Cards/copper.copper"),
+		TEXT("/Game/MaterialTraders/Cards/iron.iron"),
+		TEXT("/Game/MaterialTraders/Cards/silver.silver"),
+		TEXT("/Game/MaterialTraders/Cards/gold.gold"),
+		TEXT("/Game/MaterialTraders/Cards/diamond.diamond"),
+		TEXT("/Game/MaterialTraders/Cards/adamantium.adamantium"),
 	};
 	const TCHAR* FloatBackPath = TEXT("/Game/MaterialTraders/Cards/MI_CardFloat_Back.MI_CardFloat_Back");
 	const TCHAR* GlowPath = TEXT("/Game/MaterialTraders/Cards/M_CardGlow.M_CardGlow");
@@ -23,8 +28,8 @@ namespace
 	// Matches BP_CardBoard's WagonCard/WagonGlow setup: the pivot's X axis looks at the camera and
 	// the plane is rotated (P0, Y-90, R90) inside it.
 	const FRotator CardRelativeRotation(0.0f, -90.0f, 90.0f);
-	const FVector CardBaseScale(0.085f, 0.119f, 1.0f);
-	const FVector GlowBaseScale(0.1f, 0.134f, 1.0f);
+	const FVector CardBaseScale(0.1f, 0.14f, 1.0f);
+	const FVector GlowBaseScale(0.118f, 0.158f, 1.0f);
 	const FVector GlowOffset(-0.3f, 0.0f, 0.0f);
 }
 
@@ -41,15 +46,32 @@ void AOreDealAuctionDisplay::LoadAssets()
 {
 	if (PlaneMesh) return;
 	PlaneMesh = LoadObject<UStaticMesh>(nullptr, PlanePath);
-	for (const TCHAR* Path : FloatMaterialPaths) FaceMaterials.Add(LoadObject<UMaterialInterface>(nullptr, Path));
+	CardFaceMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/MaterialTraders/Cards/M_CardFloat.M_CardFloat"));
+	for (const TCHAR* Path : AuctionCardTexturePaths) FaceTextures.Add(LoadObject<UTexture2D>(nullptr, Path));
+	FaceMaterials.SetNum(UE_ARRAY_COUNT(AuctionCardTexturePaths));
 	BackMaterial = LoadObject<UMaterialInterface>(nullptr, FloatBackPath);
 	GlowMaterial = LoadObject<UMaterialInterface>(nullptr, GlowPath);
 }
 
-UMaterialInterface* AOreDealAuctionDisplay::MaterialFor(int32 Resource) const
+UMaterialInterface* AOreDealAuctionDisplay::MaterialFor(int32 Resource)
 {
-	UMaterialInterface* Material = FaceMaterials.IsValidIndex(Resource) ? FaceMaterials[Resource].Get() : nullptr;
-	return Material ? Material : BackMaterial.Get();
+	if (!FaceTextures.IsValidIndex(Resource) || !FaceTextures[Resource]) return BackMaterial.Get();
+	if (!FaceMaterials.IsValidIndex(Resource)) FaceMaterials.SetNum(Resource + 1);
+	if (!FaceMaterials[Resource] && CardFaceMaterial)
+	{
+		UMaterialInstanceDynamic* Dynamic = UMaterialInstanceDynamic::Create(CardFaceMaterial, this);
+		if (Dynamic)
+		{
+			TArray<FMaterialParameterInfo> Parameters;
+			TArray<FGuid> ParameterIds;
+			CardFaceMaterial->GetAllTextureParameterInfo(Parameters, ParameterIds);
+			for (const FMaterialParameterInfo& Parameter : Parameters)
+				Dynamic->SetTextureParameterValueByInfo(Parameter, FaceTextures[Resource]);
+			FaceMaterials[Resource] = Dynamic;
+		}
+	}
+	if (FaceMaterials.IsValidIndex(Resource) && FaceMaterials[Resource]) return FaceMaterials[Resource].Get();
+	return BackMaterial.Get();
 }
 
 void AOreDealAuctionDisplay::EnsureVisuals(int32 Count)

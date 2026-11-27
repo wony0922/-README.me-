@@ -1,11 +1,13 @@
 #include "OreDealStoreWidget.h"
 
 #include "Blueprint/WidgetTree.h"
+#include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/Image.h"
 #include "Components/TextBlock.h"
 #include "Engine/Texture2D.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Input/Events.h"
 #include "Input/Reply.h"
 #include "OreDealTablePlayerController.h"
@@ -55,11 +57,11 @@ namespace
 
 	// Sell page: one card-sized frame per wagon with a sell button under it.
 	constexpr int32 MaxWagons = 3;
-	constexpr float SellFrameW = 178.0f;
-	constexpr float SellFrameH = 246.0f;
-	constexpr float SellFrameY = 196.0f;
-	constexpr float SellCardW = 142.0f;
-	constexpr float SellCardH = 199.0f;
+	constexpr float SellFrameW = 200.0f;
+	constexpr float SellFrameH = 270.0f;
+	constexpr float SellFrameY = 184.0f;
+	constexpr float SellCardW = 164.0f;
+	constexpr float SellCardH = 230.0f;
 	constexpr float SellButtonY = 456.0f;
 	constexpr float SellButtonH = 52.0f;
 
@@ -71,8 +73,10 @@ namespace
 	constexpr float ConfirmButtonY = ContentCenterY + 44.0f;
 
 	// Gold plate at the bottom.
-	constexpr float GoldTextX = 652.0f;
+	constexpr float GoldTextX = 570.0f;
 	constexpr float GoldTextY = 762.0f;
+	// Keep the wood balance clearly to the right of its icon on the resource plate.
+	constexpr float WoodTextX = 920.0f;
 
 	constexpr float FocusPad = 9.0f;
 
@@ -87,11 +91,14 @@ namespace
 	constexpr float FitMarginY = 100.0f;
 
 	const TCHAR* StoreCardTexturePaths[] = {
-		TEXT("/Game/MaterialTraders/Cards/Textures/T_Card_Stone.T_Card_Stone"),
-		TEXT("/Game/MaterialTraders/Cards/Textures/T_Card_Coal.T_Card_Coal"),
-		TEXT("/Game/MaterialTraders/Cards/Textures/T_Card_Gold.T_Card_Gold"),
-		TEXT("/Game/MaterialTraders/Cards/Textures/T_Card_Iron.T_Card_Iron"),
-		TEXT("/Game/MaterialTraders/Cards/Textures/T_Card_Diamond.T_Card_Diamond"),
+		TEXT("/Game/MaterialTraders/Cards/rock.rock"),
+		TEXT("/Game/MaterialTraders/Cards/coal.coal"),
+		TEXT("/Game/MaterialTraders/Cards/copper.copper"),
+		TEXT("/Game/MaterialTraders/Cards/iron.iron"),
+		TEXT("/Game/MaterialTraders/Cards/silver.silver"),
+		TEXT("/Game/MaterialTraders/Cards/gold.gold"),
+		TEXT("/Game/MaterialTraders/Cards/diamond.diamond"),
+		TEXT("/Game/MaterialTraders/Cards/adamantium.adamantium"),
 	};
 
 	FLinearColor Ink() { return FLinearColor::FromSRGBColor(FColor(43, 26, 20)); }
@@ -211,11 +218,21 @@ void UOreDealStoreWidget::Build()
 	UTexture2D* ButtonTexture = LoadTexture(TEXT("/Game/MaterialTraders/UI/Store/T_Store_Button.T_Store_Button"));
 	UTexture2D* PaperTexture = LoadTexture(TEXT("/Game/MaterialTraders/UI/Store/T_Store_Paper.T_Store_Paper"));
 	UTexture2D* FocusTexture = LoadTexture(TEXT("/Game/MaterialTraders/UI/Store/T_Store_Focus.T_Store_Focus"));
+	UTexture2D* GoldIconTexture = LoadTexture(TEXT("/Game/MaterialTraders/UI/Textures/T_Icon_Gold.T_Icon_Gold"));
+	UTexture2D* WoodIconTexture = LoadTexture(TEXT("/Game/MaterialTraders/UI/Textures/T_Icon_Wood.T_Icon_Wood"));
 	UTexture2D* TabTextures[3] = {
 		LoadTexture(TEXT("/Game/MaterialTraders/UI/Store/T_Store_Tab_Sell.T_Store_Tab_Sell")),
-		LoadTexture(TEXT("/Game/MaterialTraders/UI/Store/T_Store_Tab_Buy.T_Store_Tab_Buy")),
-		LoadTexture(TEXT("/Game/MaterialTraders/UI/Store/T_Store_Tab_Empty.T_Store_Tab_Empty")),
+		LoadTexture(TEXT("/Game/Asset/marketButton.marketButton")),
+		LoadTexture(TEXT("/Game/MaterialTraders/UI/Store/T_Store_Tab_Inv.T_Store_Tab_Inv")),
 	};
+	UTexture2D* AxeIcon = LoadTexture(TEXT("/Game/MaterialTraders/UI/Store/T_Icon_ManyWood.T_Icon_ManyWood"));
+	UTexture2D* ChaosIcon = LoadTexture(TEXT("/Game/MaterialTraders/UI/Store/T_Icon_Chaos.T_Icon_Chaos"));
+	UTexture2D* SmashIcon = LoadTexture(TEXT("/Game/MaterialTraders/UI/Store/T_Icon_Smash.T_Icon_Smash"));
+	UTexture2D* AIGlassesIcon = LoadTexture(TEXT("/Game/MaterialTraders/UI/Store/T_Icon_AIGlasses.T_Icon_AIGlasses"));
+	UTexture2D* BottleIcon = LoadTexture(TEXT("/Game/MaterialTraders/UI/Store/T_Icon_Bottle.T_Icon_Bottle"));
+	UTexture2D* ManyWoodIcon = LoadTexture(TEXT("/Game/MaterialTraders/UI/Store/T_Icon_ManyWood.T_Icon_ManyWood"));
+	UTexture2D* RepairIcon = LoadTexture(TEXT("/Game/MaterialTraders/UI/Store/T_Store_Tab_Buy.T_Store_Tab_Buy"));
+	UTexture2D* WagonUpgradeIcon = LoadTexture(TEXT("/Game/MaterialTraders/UI/Store/T_Store_WagonSlotUpgrade.T_Store_WagonSlotUpgrade"));
 	for (const TCHAR* Path : StoreCardTexturePaths) CardTextures.Add(LoadTexture(Path));
 	CardBackTexture = LoadTexture(TEXT("/Game/MaterialTraders/Cards/Textures/T_Card_Back.T_Card_Back"));
 
@@ -229,10 +246,31 @@ void UOreDealStoreWidget::Build()
 	// Dim the table behind the store.
 	UImage* Dim = AddImage(Root, nullptr, 0.0f, 0.0f, 0.0f, 0.0f);
 	Dim->SetColorAndOpacity(FLinearColor(0.0f, 0.0f, 0.0f, 0.45f));
+	// The dimmer is artwork only. A transparent full-screen button below the panel
+	// provides a reliable Slate click route even when the viewport has used mouse capture.
+	Dim->SetVisibility(ESlateVisibility::HitTestInvisible);
 	if (UCanvasPanelSlot* DimSlot = Cast<UCanvasPanelSlot>(Dim->Slot))
 	{
 		DimSlot->SetAnchors(FAnchors(0.0f, 0.0f, 1.0f, 1.0f));
 		DimSlot->SetOffsets(FMargin(0.0f));
+	}
+	InputRouter = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("StoreInputRouter"));
+	InputRouter->SetClickMethod(EButtonClickMethod::MouseDown);
+	FButtonStyle RouterStyle;
+	FSlateBrush InvisibleBrush;
+	InvisibleBrush.DrawAs = ESlateBrushDrawType::NoDrawType;
+	InvisibleBrush.TintColor = FSlateColor(FLinearColor::Transparent);
+	RouterStyle.SetNormal(InvisibleBrush);
+	RouterStyle.SetHovered(InvisibleBrush);
+	RouterStyle.SetPressed(InvisibleBrush);
+	RouterStyle.SetDisabled(InvisibleBrush);
+	InputRouter->SetStyle(RouterStyle);
+	InputRouter->OnClicked.AddDynamic(this, &UOreDealStoreWidget::OnStoreInputRouterClicked);
+	if (UCanvasPanelSlot* RouterSlot = Root->AddChildToCanvas(InputRouter))
+	{
+		RouterSlot->SetAnchors(FAnchors(0.0f, 0.0f, 1.0f, 1.0f));
+		RouterSlot->SetOffsets(FMargin(0.0f));
+		RouterSlot->SetZOrder(0);
 	}
 
 	Panel = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("OreDealStorePanel"));
@@ -245,6 +283,7 @@ void UOreDealStoreWidget::Build()
 		PanelSlot->SetPosition(FVector2D(0.0f, -14.0f));
 		PanelSlot->SetZOrder(1);
 	}
+	SetIsFocusable(true);
 
 	// Key hint just under the panel (inside it, so it scales and moves with the panel).
 	UTextBlock* Hint = AddText(Panel, 15, Cream(), PanelW * 0.5f, PanelH + 8.0f, FVector2D(0.5f, 0.0f), 2);
@@ -258,7 +297,12 @@ void UOreDealStoreWidget::Build()
 
 	// Tabs.
 	for (int32 Index = 0; Index < 3; ++Index)
-		TabImages.Add(AddImage(Panel, TabTextures[Index], TabX, TabY[Index], TabW, TabH, 2));
+	{
+		if (Index == 1)
+			AddImage(Panel, LoadTexture(TEXT("/Game/MaterialTraders/UI/Store/T_Store_Tab_Empty.T_Store_Tab_Empty")), TabX, TabY[Index], TabW, TabH, 2);
+		TabImages.Add(AddImage(Panel, TabTextures[Index], TabX, TabY[Index], TabW, TabH, Index == 1 ? 3 : 2));
+		TabLabels.Add(nullptr);
+	}
 	TabMark = AddImage(Panel, FocusTexture, 0.0f, 0.0f, 0.0f, 0.0f, 3, FocusMargin);
 	TabMark->SetColorAndOpacity(FLinearColor(1.0f, 1.0f, 1.0f, 0.55f));
 
@@ -278,12 +322,44 @@ void UOreDealStoreWidget::Build()
 		const FOreDealStoreItem& Item = Items[Index];
 		AddImage(BuyPage, PaperTexture, X + (SlotW - 118.0f) * 0.5f, Y + (SlotH - 118.0f) * 0.5f, 118.0f, 118.0f, 1, PaperMargin);
 		UTexture2D* Icon = Item.Icon.LoadSynchronous();
+		// Use the imported shop illustrations for these known catalog entries even if an
+		// older BP_PC_Table row still points at a placeholder image.
+		if (Item.Id == TEXT("axe")) Icon = AxeIcon;
+		else if (Item.Id == TEXT("ChaosCard")) Icon = ChaosIcon;
+		else if (Item.Id == TEXT("oil")) Icon = SmashIcon;
+		else if (Item.Id == TEXT("fix")) Icon = RepairIcon;
+		else if (Item.Id == TEXT("AIglasses")) Icon = AIGlassesIcon;
+		else if (Item.Id == TEXT("bottle")) Icon = BottleIcon;
+		else if (Item.Id == TEXT("wood")) Icon = WoodIconTexture;
+		else if (Item.Id == TEXT("WagonSlotUpgrade")) Icon = WagonUpgradeIcon;
+		if (!Icon) Icon = CardBackTexture;
 		AddImage(BuyPage, Icon, X + (SlotW - 96.0f) * 0.5f, Y + (SlotH - 96.0f) * 0.5f, 96.0f, 96.0f, 2);
 		SetLabel(AddText(BuyPage, 18, Ink(), X + TagOffsetX - 6.0f, Y + 221.0f, FVector2D(1.0f, 0.5f), 3), Item.Name);
 		AddImage(BuyPage, TagTexture, X + TagOffsetX, Y + TagOffsetY, TagW, TagH, 4);
-		UTextBlock* Cost = AddText(BuyPage, 20, Ink(), X + TagOffsetX + 43.0f, Y + TagOffsetY + 47.0f, FVector2D(0.0f, 0.5f), 5);
-		SetLabel(Cost, FString::Printf(TEXT("%d%s"), Item.Cost, Item.Currency == EOreDealStoreCurrency::Wood ? TEXT("W") : TEXT("G")));
+		UTextBlock* Cost = AddText(BuyPage, 20, Ink(), X + TagOffsetX + 47.0f, Y + TagOffsetY + 47.0f, FVector2D(0.5f, 0.5f), 5);
+		SetLabel(Cost, FString::FromInt(Item.Cost));
 		BuyCostTexts.Add(Cost);
+		BuyCostIcons.Add(AddImage(BuyPage, Item.Currency == EOreDealStoreCurrency::Wood ? WoodIconTexture : GoldIconTexture,
+			X + TagOffsetX + 59.0f, Y + TagOffsetY + 35.0f, 24.0f, 24.0f, 5));
+	}
+
+	// ---- Player status page.
+	InventoryPage = AddPage(10);
+	for (int32 Index = 0; Index < 4; ++Index)
+	{
+		const float X = 300.0f + (Index % 2) * 360.0f;
+		const float Y = 150.0f + (Index / 2) * 275.0f;
+		AddImage(InventoryPage, SlotTexture, X, Y, 330.0f, 245.0f, 0, FMargin(0.12f));
+		AddImage(InventoryPage, PaperTexture, X + 15.0f, Y + 15.0f, 300.0f, 215.0f, 1, PaperMargin);
+		PlayerNameTexts.Add(AddText(InventoryPage, 22, Ink(), X + 165.0f, Y + 38.0f, FVector2D(0.5f, 0.5f), 2));
+		AddImage(InventoryPage, GoldIconTexture, X + 45.0f, Y + 70.0f, 34.0f, 34.0f, 2);
+		PlayerGoldTexts.Add(AddText(InventoryPage, 19, Ink(), X + 88.0f, Y + 88.0f, FVector2D(0.0f, 0.5f), 2));
+		AddImage(InventoryPage, WoodIconTexture, X + 175.0f, Y + 70.0f, 34.0f, 34.0f, 2);
+		PlayerWoodTexts.Add(AddText(InventoryPage, 19, Ink(), X + 218.0f, Y + 88.0f, FVector2D(0.0f, 0.5f), 2));
+		AddImage(InventoryPage, AxeIcon, X + 42.0f, Y + 128.0f, 48.0f, 48.0f, 2);
+		PlayerAxeTexts.Add(AddText(InventoryPage, 17, Ink(), X + 100.0f, Y + 152.0f, FVector2D(0.0f, 0.5f), 2));
+		AddImage(InventoryPage, WagonUpgradeIcon, X + 174.0f, Y + 128.0f, 48.0f, 48.0f, 2);
+		PlayerWagonTexts.Add(AddText(InventoryPage, 17, Ink(), X + 232.0f, Y + 152.0f, FVector2D(0.0f, 0.5f), 2));
 	}
 
 	// ---- Sell page: one card frame per wagon.
@@ -320,9 +396,15 @@ void UOreDealStoreWidget::Build()
 	}
 
 	// Gold plate text, notice line and the moving highlight.
-	GoldText = AddText(Panel, 42, Ink(), GoldTextX, GoldTextY, FVector2D(0.0f, 0.5f), 5);
+	GoldIcon = AddImage(Panel, GoldIconTexture, 535.0f, GoldTextY - 15.0f, 30.0f, 30.0f, 5);
+	// The background plate already contains a large log illustration on the left.
+	// Do not draw a second wood icon over it; reserve the blank right side for the count.
+	WoodIcon = nullptr;
+	GoldText = AddText(Panel, 27, Ink(), GoldTextX, GoldTextY, FVector2D(0.0f, 0.5f), 5);
 	GoldText->SetRenderTransformPivot(FVector2D(0.0f, 0.5f));
-	SetLabel(GoldText, TEXT("0g · 0w"));
+	SetLabel(GoldText, TEXT("0"));
+	WoodText = AddText(Panel, 27, Ink(), WoodTextX, GoldTextY, FVector2D(0.5f, 0.5f), 5);
+	SetLabel(WoodText, TEXT("0"));
 	NoticeText = AddText(Panel, 15, Bad(), 318.0f, GoldTextY, FVector2D(0.5f, 0.5f), 5);
 	NoticeText->SetVisibility(ESlateVisibility::Collapsed);
 	FocusImage = AddImage(Panel, FocusTexture, 0.0f, 0.0f, 0.0f, 0.0f, 60, FocusMargin);
@@ -336,7 +418,7 @@ void UOreDealStoreWidget::SetStoreOpen(bool bOpen)
 	if (bStoreOpen == bOpen) return;
 	bStoreOpen = bOpen;
 	CancelPending();
-	BP_SetStoreOpen(bOpen);
+	if (!Panel) BP_SetStoreOpen(bOpen);
 	if (bOpen)
 	{
 		// Always start on the sell tab with the first wagon highlighted.
@@ -350,6 +432,25 @@ void UOreDealStoreWidget::SetStoreOpen(bool bOpen)
 	}
 	// Visible (not HitTestInvisible) so the widget itself receives mouse clicks and hover.
 	SetVisibility(bOpen ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+}
+
+void UOreDealStoreWidget::OnStoreInputRouterClicked()
+{
+	if (!bStoreOpen) return;
+	// GetCursorPos and CachedGeometry::AbsoluteToLocal use the same Slate desktop
+	// coordinate space. Avoid mixing it with viewport coordinates scaled by DPI.
+	const FVector2D AbsolutePosition = FSlateApplication::IsInitialized()
+		? FSlateApplication::Get().GetCursorPos() : FVector2D::ZeroVector;
+	HandleMouseClickAtScreenPosition(AbsolutePosition);
+}
+
+void UOreDealStoreWidget::OpenInventoryTab()
+{
+	if (!bStoreOpen) SetStoreOpen(true);
+	SelectTab(2);
+	Zone = EZone::Content;
+	Cursor = 0;
+	RefreshView();
 }
 
 void UOreDealStoreWidget::CancelPending()
@@ -369,11 +470,13 @@ void UOreDealStoreWidget::ApplyState(const FOreDealStoreState& State)
 	const bool bGoldChanged = !bHasState || State.Gold != Current.Gold;
 	const bool bWoodChanged = !bHasState || State.Wood != Current.Wood;
 	const bool bWagonsChanged = !bHasState || State.Wagons != Current.Wagons;
-	if (!bGoldChanged && !bWoodChanged && !bWagonsChanged) return;
-	if (GoldText && (bGoldChanged || bWoodChanged)) SetLabel(GoldText, FString::Printf(TEXT("%dg · %dw"), State.Gold, State.Wood));
+	const bool bItemsChanged = !bHasState || State.ItemCounts != Current.ItemCounts;
+	const bool bPlayersChanged = !bHasState || State.PlayerStatuses != Current.PlayerStatuses;
+	if (!bGoldChanged && !bWoodChanged && !bWagonsChanged && !bItemsChanged && !bPlayersChanged) return;
+	if (GoldText && bGoldChanged) SetLabel(GoldText, FString::FromInt(State.Gold));
+	if (WoodText && bWoodChanged) SetLabel(WoodText, FString::FromInt(State.Wood));
 	if (bGoldChanged && GoldText)
 	{
-		SetLabel(GoldText, FString::Printf(TEXT("%dg · %dw"), State.Gold, State.Wood));
 		if (bHasState)
 		{
 			// Immediate feedback: the number pops and flashes green (earned) or red (spent).
@@ -395,7 +498,7 @@ void UOreDealStoreWidget::ApplyState(const FOreDealStoreState& State)
 
 void UOreDealStoreWidget::ShowNotice(const FString& Message, bool bGood)
 {
-	BP_ShowStoreNotice(Message, bGood);
+	if (!Panel) BP_ShowStoreNotice(Message, bGood);
 	if (!NoticeText) return;
 	SetLabel(NoticeText, Message);
 	NoticeText->SetColorAndOpacity(FSlateColor(bGood ? Good() : Bad()));
@@ -444,6 +547,7 @@ int32 UOreDealStoreWidget::GetContentCount() const
 {
 	if (Tab == 0) return GetWagonCount();
 	if (Tab == 1) return FMath::Min(OreDealStore::SlotCount, StoreItems.Num());
+	if (Tab == 2) return 0;
 	return 0;
 }
 
@@ -480,7 +584,12 @@ void UOreDealStoreWidget::CollectHits(TArray<FHit>& OutHits) const
 	{
 		const int32 Count = GetWagonCount();
 		for (int32 Index = 0; Index < Count; ++Index)
-			Add(GetWagonCenterX(Index, Count) - SellFrameW * 0.5f, SellButtonY, SellFrameW, SellButtonH, EHit::Content, Index);
+		{
+			const float CenterX = GetWagonCenterX(Index, Count);
+			// The whole visible card and its sell button activate the same wagon.
+			Add(CenterX - SellFrameW * 0.5f, SellFrameY, SellFrameW, SellFrameH, EHit::Content, Index);
+			Add(CenterX - SellFrameW * 0.5f, SellButtonY, SellFrameW, SellButtonH, EHit::Content, Index);
+		}
 	}
 	else if (Tab == 1)
 	{
@@ -491,14 +600,31 @@ void UOreDealStoreWidget::CollectHits(TArray<FHit>& OutHits) const
 
 bool UOreDealStoreWidget::FindHit(const FPointerEvent& MouseEvent, FHit& OutHit) const
 {
+	return FindHitAtScreenPosition(MouseEvent.GetScreenSpacePosition(), OutHit);
+}
+
+bool UOreDealStoreWidget::FindHitAtScreenPosition(const FVector2D& AbsoluteScreenPosition, FHit& OutHit) const
+{
 	if (!Panel) return false;
-	const auto LocalPoint = Panel->GetCachedGeometry().AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
+	const auto LocalPoint = Panel->GetCachedGeometry().AbsoluteToLocal(AbsoluteScreenPosition);
 	const FVector2D Local(LocalPoint.X, LocalPoint.Y);
 	TArray<FHit> Hits;
 	CollectHits(Hits);
 	for (const FHit& Hit : Hits)
 		if (Hit.Contains(Local)) { OutHit = Hit; return true; }
 	return false;
+}
+
+void UOreDealStoreWidget::HandleMouseClickAtScreenPosition(const FVector2D& AbsoluteScreenPosition)
+{
+	FHit Hit;
+	if (!bStoreOpen || !FindHitAtScreenPosition(AbsoluteScreenPosition, Hit)) return;
+	if (Hit.Kind == EHit::Confirm) ConfirmCursor = Hit.Index;
+	else if (Hit.Kind == EHit::Tab) { Zone = EZone::Tabs; TabCursor = Hit.Index; }
+	else { Zone = EZone::Content; Cursor = Hit.Index; }
+	if (Hit.Kind == EHit::Tab) SelectTab(Hit.Index);
+	else Activate();
+	RefreshView();
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -538,7 +664,7 @@ void UOreDealStoreWidget::MoveFocus(int32 DX, int32 DY)
 	}
 	const int32 Count = GetContentCount();
 	if (Count <= 0) { Zone = EZone::Tabs; return; }
-	if (Tab == 1)
+	if (Tab == 1 || Tab == 2)
 	{
 		int32 Column = Cursor % OreDealStore::SlotColumns;
 		int32 Row = Cursor / OreDealStore::SlotColumns;
@@ -594,7 +720,7 @@ void UOreDealStoreWidget::Activate()
 		if (!Items.IsValidIndex(Cursor)) return;
 		const FOreDealStoreItem& Item = Items[Cursor];
 		const int32 Balance = Item.Currency == EOreDealStoreCurrency::Wood ? Current.Wood : Current.Gold;
-		if (Item.Cost > Balance) { ShowNotice(Item.Currency == EOreDealStoreCurrency::Wood ? TEXT("나무가 부족합니다") : TEXT("골드가 부족합니다"), false); return; }
+		if (Item.Cost > Balance) return;
 		PendingItem = Item.Id;
 		ConfirmCursor = 0;
 		bConfirmOpen = true;
@@ -710,20 +836,8 @@ FReply UOreDealStoreWidget::NativeOnMouseMove(const FGeometry& InGeometry, const
 
 FReply UOreDealStoreWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
-	FHit Hit;
-	if (bStoreOpen && InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && FindHit(InMouseEvent, Hit))
-	{
-		if (Hit.Kind == EHit::Confirm) ConfirmCursor = Hit.Index;
-		else if (Hit.Kind == EHit::Tab) { Zone = EZone::Tabs; TabCursor = Hit.Index; }
-		else { Zone = EZone::Content; Cursor = Hit.Index; }
-		if (Hit.Kind == EHit::Tab)
-		{
-			// Clicking an icon only switches the page; the highlight stays on the icon.
-			SelectTab(Hit.Index);
-		}
-		else Activate();
-		RefreshView();
-	}
+	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+		HandleMouseClickAtScreenPosition(InMouseEvent.GetScreenSpacePosition());
 	// The store is modal: clicks never fall through to the table behind it.
 	return FReply::Handled();
 }
@@ -735,7 +849,9 @@ void UOreDealStoreWidget::RefreshView()
 {
 	if (!Panel)
 	{
-		BP_RefreshStore(Current.Gold, Current.Wagons, StoreItems, Tab, Cursor, bConfirmOpen, PendingItem);
+		// The legacy Blueprint refresh graph only contains the original sell/buy rows. Its
+		// fixed five-row arrays do not include the new inventory tab.
+		if (Tab < 2) BP_RefreshStore(Current.Gold, Current.Wagons, StoreItems, Tab, Cursor, bConfirmOpen, PendingItem);
 		return;
 	}
 
@@ -744,6 +860,9 @@ void UOreDealStoreWidget::RefreshView()
 	SetRect(TabMark, TabX - FocusPad, TabY[Tab] - FocusPad, TabW + FocusPad * 2.0f, TabH + FocusPad * 2.0f);
 	SetShown(SellPage, Tab == 0);
 	SetShown(BuyPage, Tab == 1);
+	SetShown(InventoryPage, Tab == 2);
+	for (int32 Index = 0; Index < TabLabels.Num(); ++Index)
+		if (TabLabels[Index]) TabLabels[Index]->SetColorAndOpacity(FSlateColor(Ink()));
 	SetShown(ConfirmLayer, bConfirmOpen);
 
 	if (Tab == 0)
@@ -790,8 +909,8 @@ void UOreDealStoreWidget::RefreshView()
 				FSlateBrush CardBrush;
 				CardBrush.SetResourceObject(CardTextureFor(Wagon.Resource));
 				SellCards[Index]->SetBrush(CardBrush);
-				static const TCHAR* ResourceNames[] = { TEXT("Rock"), TEXT("Coal"), TEXT("Copper"), TEXT("Iron"), TEXT("Silver"), TEXT("Gold"), TEXT("Diamond"), TEXT("Adamantium") };
-				SetLabel(SellResourceTexts[Index], Wagon.Resource >= 0 && Wagon.Resource < UE_ARRAY_COUNT(ResourceNames) ? FString(ResourceNames[Wagon.Resource]) : TEXT("?"));
+				static const TCHAR* StoreResourceNames[] = { TEXT("Rock"), TEXT("Coal"), TEXT("Copper"), TEXT("Iron"), TEXT("Silver"), TEXT("Gold"), TEXT("Diamond"), TEXT("Adamantium") };
+				SetLabel(SellResourceTexts[Index], Wagon.Resource >= 0 && Wagon.Resource < UE_ARRAY_COUNT(StoreResourceNames) ? FString(StoreResourceNames[Wagon.Resource]) : TEXT("?"));
 				SetPoint(SellResourceTexts[Index], CenterX, SellFrameY + SellFrameH * 0.5f);
 				SetLabel(SellCountTexts[Index], FString::Printf(TEXT("x %d"), Wagon.Count));
 			}
@@ -808,6 +927,22 @@ void UOreDealStoreWidget::RefreshView()
 		for (int32 Index = 0; Index < BuyCostTexts.Num(); ++Index)
 			if (BuyCostTexts[Index] && Items.IsValidIndex(Index))
 				BuyCostTexts[Index]->SetColorAndOpacity(FSlateColor(Items[Index].Cost > (Items[Index].Currency == EOreDealStoreCurrency::Wood ? Current.Wood : Current.Gold) ? Bad() : Ink()));
+	}
+	else if (Tab == 2)
+	{
+		for (int32 Index = 0; Index < PlayerNameTexts.Num(); ++Index)
+		{
+			const bool bPresent = Current.PlayerStatuses.IsValidIndex(Index);
+			const FOreDealStoreState::FPlayerStatus Empty;
+			const auto& Status = bPresent ? Current.PlayerStatuses[Index] : Empty;
+			SetLabel(PlayerNameTexts[Index], bPresent ? Status.Name : TEXT("빈 자리"));
+			SetLabel(PlayerGoldTexts[Index], bPresent ? FString::Printf(TEXT("%d"), Status.Gold) : TEXT("—"));
+			SetLabel(PlayerWoodTexts[Index], bPresent ? FString::Printf(TEXT("%d"), Status.Wood) : TEXT("—"));
+			SetLabel(PlayerAxeTexts[Index], Status.bHasAxe ? TEXT("도끼 보유") : TEXT("도끼 없음"));
+			SetLabel(PlayerWagonTexts[Index], Status.bHasWagonSlot ? TEXT("슬롯 보유") : TEXT("슬롯 없음"));
+			PlayerAxeTexts[Index]->SetColorAndOpacity(FSlateColor(Status.bHasAxe ? Good() : Ink() * 0.55f));
+			PlayerWagonTexts[Index]->SetColorAndOpacity(FSlateColor(Status.bHasWagonSlot ? Good() : Ink() * 0.55f));
+		}
 	}
 
 	if (bConfirmOpen)
@@ -848,5 +983,6 @@ void UOreDealStoreWidget::RefreshView()
 	const FHit* Focus = Hits.FindByPredicate([WantedKind, WantedIndex](const FHit& Hit) { return Hit.Kind == WantedKind && Hit.Index == WantedIndex; });
 	SetShown(FocusImage, Focus != nullptr);
 	if (Focus) SetRect(FocusImage, Focus->X - FocusPad, Focus->Y - FocusPad, Focus->W + FocusPad * 2.0f, Focus->H + FocusPad * 2.0f);
-	BP_RefreshStore(Current.Gold, Current.Wagons, StoreItems, Tab, Cursor, bConfirmOpen, PendingItem);
+	// The native canvas is the active store UI. Do not refresh the legacy Blueprint
+	// rows here; they overlap this layout and make the panel appear doubled/misaligned.
 }

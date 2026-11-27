@@ -16,12 +16,10 @@ UENUM()
 enum class EOreDealAuctionStage : uint8
 {
 	Idle,
-	PickReveal,     // Turn player takes one or more of the deck-top cards (덱 위 카드).
-	ActiveOffer,    // Turn player pushes hand cards (손패) onto the deck-top array.
-	SelectLot,      // Turn player highlights deck-top cards to trade next (거래 카드).
-	Bidding,        // Everyone else offers hand cards (or confirms with nothing).
-	ChoosePartner,  // Turn player picks one of the players who offered.
-	Consume         // Trading done: everyone must place their taken cards.
+	PickReveal,     // Open trade stage: the active player takes central cards; others can revise requests.
+	RequestReview,  // The active player inspects and accepts/rejects a request.
+	ConfirmTrade,   // The selected requester makes the final accept/reject decision.
+	Consume         // Central cards are gone; every acquired card must be planted.
 };
 
 /** Per-player auction state. Offers are public once confirmed (they are shown at the table). */
@@ -34,9 +32,13 @@ struct FOreDealAuctionSeat
 	/** Hand indices of the confirmed offer, ascending. Cards stay in the hand until a trade happens. */
 	UPROPERTY() TArray<int32> OfferHandIndices;
 	UPROPERTY() TArray<int32> OfferCards;
+	/** Indices into the currently revealed central cards requested by this player. */
+	UPROPERTY() TArray<int32> RequestedRevealIndices;
 	UPROPERTY() bool bConfirmed = false;
 	/** Cards taken during this trade phase, in the order they were taken. Must all be placed on wagons. */
 	UPROPERTY() TArray<int32> PendingCards;
+	/** Directly taken centre cards can be returned until planted; traded cards cannot. */
+	UPROPERTY() TArray<uint8> PendingReturnable;
 };
 
 /**
@@ -56,8 +58,11 @@ public:
 
 	// Server actions (validated; called from UOreDealAuctionComponent server RPCs).
 	void PickReveal(APlayerState* Player, const TArray<int32>& RevealIndices);
-	void SubmitOffer(APlayerState* Player, const TArray<int32>& HandIndices);
-	void SelectLot(APlayerState* Player, const TArray<int32>& PoolIndices);
+	void SubmitRequest(APlayerState* Player, const TArray<int32>& RevealIndices, const TArray<int32>& HandIndices);
+	void CancelRequest(APlayerState* Player);
+	void ResolveRequest(APlayerState* Player, bool bAccept);
+	void PlantHandCard(APlayerState* Player, int32 WagonIndex);
+	void ReturnPending(APlayerState* Player);
 	void FocusPartner(APlayerState* Player, APlayerState* Target);
 	void ChoosePartner(APlayerState* Player, APlayerState* Target);
 	void PlacePending(APlayerState* Player, int32 WagonIndex);
@@ -126,13 +131,10 @@ private:
 	void Start(AActor* Deck, APlayerState* TurnPlayer);
 	void ResetToIdle();
 	void ClearOffers();
-	void ResolveBids();
-	void ExecuteTrade(APlayerState* Target);
-	void AfterLotResolved();
 	void EnterConsume();
-	void CollectLot(TArray<int32>& OutCards);
 	bool AllOthersConfirmed() const;
 	bool AllPendingEmpty() const;
+	bool HasReturnablePending() const;
 	bool ReadHand(const APlayerState* Player, TArray<int32>& OutCards) const;
 	bool RemoveHandIndices(APlayerState* Player, const TArray<int32>& Indices, TArray<int32>* OutRemoved);
 	bool CallAddCard(AActor* Board, int32 Resource, int32 WagonIndex, APlayerState* Player) const;

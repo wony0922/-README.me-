@@ -9,6 +9,11 @@ class APawn;
 class AActor;
 class APlayerState;
 class UInputMappingContext;
+class UPrimitiveComponent;
+class UMaterialInterface;
+class UOreDealCeremonyWidget;
+class ASpotLight;
+class UNiagaraSystem;
 class UOreDealInteractionWidget;
 class UOreDealHandViewWidget;
 class UOreDealPreGameComponent;
@@ -16,6 +21,7 @@ class AOreDealMarketBroker;
 class UOreDealAuctionComponent;
 class UOreDealStoreComponent;
 class UOreDealStoreWidget;
+class UOreDealInventoryWidget;
 class UUserWidget;
 class APlayerState;
 struct FInputKeyEventArgs;
@@ -56,6 +62,7 @@ public:
 	bool IsStoreGameStarted() const;
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Ore Deal|Store")
 	int32 GetStorePlayerGold() const;
+	int32 GetStorePlayerWood() const;
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Ore Deal|Store")
 	bool HasEnoughStoreGold(int32 Cost) const;
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Ore Deal|Store")
@@ -83,6 +90,7 @@ public:
 	void BP_GrantStoreWagonSlotUpgrade();
 	UFUNCTION(Client, Reliable) void ClientShowSaleToast(const FString& Resource, int32 Count);
 	UFUNCTION(Client, Reliable) void ClientReceiveChat(const FString& Sender, const FString& Message);
+	UFUNCTION(Client, Reliable) void ClientPlayProtectedCardFeedback(int32 WagonIndex);
 	UFUNCTION(Client, Reliable) void ClientPlayWagonEffect(AActor* Board, int32 WagonIndex, EOreDealSlotEffect EffectType);
 	static void BroadcastWagonEffect(UWorld* World, AActor* Board, int32 WagonIndex, EOreDealSlotEffect EffectType);
 	static int32 CalculateSaleReward(int32 Resource, int32 Count, const UObject* WorldContext = nullptr);
@@ -90,6 +98,8 @@ public:
 
 	/** 우승자 결정 및 게임 종료 세레머니 시작 RPC */
 	UFUNCTION(Client, Reliable) void ClientStartGameOverCeremony(APlayerState* WinnerPlayerState);
+	UFUNCTION(BlueprintPure, Category="Ore Deal|Game Over") bool ShouldShowResultPrompt() const { return bResultPromptActive; }
+	void SetAuctionModalInput(bool bOpen);
 	/** Records a hand-card placement on the server when the owning remote client plants. */
 	UFUNCTION(Server, Reliable) void ServerRecordMandatoryHandPlacement(AActor* CardDeck, APlayerState* PlacingPlayer);
 	/** Plants the active hand card with auto-matching, 1-card waste protection, and sale/shatter settlement. */
@@ -100,11 +110,15 @@ public:
 	UFUNCTION(Server, Reliable) void ServerRequestSupplyDraw();
 	UFUNCTION(Server, Reliable) void ServerPickupBottle(AActor* Bottle);
 	UFUNCTION(Server, Reliable) void ServerThrowBottle();
+	UFUNCTION(Server, Reliable) void ServerDrinkBottle();
 	UFUNCTION(Client, Reliable) void ClientSetHoldingBottle(bool bHolding);
 	UOreDealAuctionComponent* GetAuctionComponent() const { return AuctionComponent; }
 	/** Wagon the A/D focus is on (0 = 마차 1; drives BP_PC_Table.FocusIndex from 2). */
 	int32 GetWagonFocus() const;
 	void SetWagonFocus(int32 WagonIndex);
+	/** Opens the store directly on its inventory page from the always-visible card pile. */
+	void OpenStoreInventory();
+	void GetStoreInventoryCounts(TArray<int32>& OutCounts) const;
 	/** Server-side grant for the one-time store wagon-slot upgrade. */
 	bool GrantStoreWagonSlotUpgrade();
 
@@ -141,6 +155,8 @@ protected:
 	/** Store window (F): sell wagons, buy items. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Ore Deal")
 	TObjectPtr<UOreDealStoreComponent> StoreComponent;
+	UPROPERTY(Transient)
+	TObjectPtr<UOreDealInventoryWidget> InventoryWidget;
 	/** Ordered shop products; editable in BP_PC_Table's defaults. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ore Deal|Store")
 	TArray<FOreDealStoreItem> StoreItems;
@@ -161,6 +177,7 @@ private:
 	/** True while the camera eases back inside the yaw limit after an auction camera turn. */
 	bool bCameraReturning = false;
 	bool bSupplyDrawRequested = false;
+	int32 LastObservedHandCount = INDEX_NONE;
 	int32 SupplyDrawInitialHandCount = 0;
 	int32 SupplyDrawRequestedCount = 0;
 	UPROPERTY() TArray<int32> SupplyDrawPendingCards;
@@ -169,6 +186,13 @@ private:
 	mutable TWeakObjectPtr<AActor> CachedPlayerBoard;
 	TWeakObjectPtr<AActor> CachedCardDeck;
 	float MarketRefreshElapsed = 0.0f;
+	float ProtectedFeedbackElapsed = 0.0f;
+	float StackLabelRefreshElapsed = 0.0f;
+	int32 ProtectedFeedbackWagonIndex = INDEX_NONE;
+	FVector ProtectedCardStartLocation = FVector::ZeroVector;
+	TWeakObjectPtr<UPrimitiveComponent> ProtectedGlowComponent;
+	TWeakObjectPtr<UPrimitiveComponent> ProtectedCardComponent;
+	UPROPERTY(Transient) TArray<TObjectPtr<UMaterialInterface>> ProtectedGlowOriginalMaterials;
 
 	// --- 게임 종료 세레머니 & 결과창 상태 ---
 	bool bInGameOverCeremony = false;
@@ -176,6 +200,8 @@ private:
 	bool bRandomCameraPhase = false;
 	bool bResultWidgetOpen = false;
 	bool bCanPressEnterForMainMenu = false;
+	bool bResultPromptActive = false;
+	int32 CeremonyStage = 0;
 	float CeremonyTimeElapsed = 0.0f;
 	float WinnerPhaseDuration = 5.0f; // 우승자 카메라 연출 시간(초)
 	float CameraSwitchInterval = 4.0f; // 카메라 전환 간격(초)
@@ -185,16 +211,32 @@ private:
 	TWeakObjectPtr<AActor> CurrentActiveCamera;
 	TMap<int32, FVector> CameraInitialLocations;
 	TWeakObjectPtr<APlayerState> WinnerState;
+	TWeakObjectPtr<ASpotLight> CeremonySpotlight;
+	TArray<TWeakObjectPtr<APawn>> CeremonyPlayers;
+	int32 SpotlightIndex = 0;
+	UPROPERTY(Transient) TObjectPtr<UNiagaraSystem> WinnerCoinSystem;
+	FTimerHandle WinnerCoinTimerHandle;
 
 	UPROPERTY()
 	TObjectPtr<UUserWidget> ResultWidgetInstance;
+	UPROPERTY(Transient)
+	TObjectPtr<UOreDealCeremonyWidget> CeremonyWidget;
 
 	void UpdateGameOverCeremony(float DeltaTime);
 	void SwitchToNextRandomCamera();
 	void ShowResultScreen();
+	void BindResultButtons();
 	void ReturnToMainMenu();
+	void RestartCurrentMatch();
+	void SpawnWinnerCoinBurst();
+	void UpdateCeremonySpotlight(float DeltaTime);
+	UFUNCTION() void HandleResultRematchClicked();
+	UFUNCTION() void HandleResultMainMenuClicked();
 
 	void CleanUpBoardWagonTexts();
+	void EnsureSeatMerchantBells();
+	void UpdateWagonStackLabels();
+	void UpdateProtectedCardFeedback(float DeltaTime);
 
 	AActor* GetPlayerBoard() const;
 	int32 GetWagonSlotCount() const;

@@ -2,6 +2,7 @@
 
 #include "Camera/PlayerCameraManager.h"
 #include "Components/PrimitiveComponent.h"
+#include "Components/TextRenderComponent.h"
 #include "Engine/World.h"
 #include "Math/RotationMatrix.h"
 #include "GameFramework/Pawn.h"
@@ -11,6 +12,11 @@
 #include "OreDealAuctionDisplay.h"
 #include "OreDealAuctionHudWidget.h"
 #include "OreDealTablePlayerController.h"
+#include "Engine/Texture2D.h"
+#include "EngineUtils.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
+#include "UObject/UnrealType.h"
 
 namespace
 {
@@ -22,12 +28,117 @@ namespace
 	constexpr float DeckRowHeight = 14.0f;        // card height 11.9 + gap
 	constexpr int32 DeckPerRow = 3;
 	const TCHAR* BlueprintRevealParts[] = { TEXT("RevealCard0"), TEXT("RevealGlow0"), TEXT("RevealCard1"), TEXT("RevealGlow1") };
-	constexpr float OfferCardScale = 1.1f;
+	constexpr float OfferCardScale = 1.18f;
 	constexpr float OfferColumnStep = 12.0f;
 	constexpr float OfferRowStep = 16.5f;
 	constexpr int32 OfferPerRow = 5;
-	constexpr float PendingCardScale = 0.8f;
+	constexpr float PendingCardScale = 0.92f;
 	constexpr float PendingStep = 3.5f;
+	const TCHAR* HandCardTexturePaths[] = {
+		TEXT("/Game/MaterialTraders/Cards/rock.rock"), TEXT("/Game/MaterialTraders/Cards/coal.coal"),
+		TEXT("/Game/MaterialTraders/Cards/copper.copper"), TEXT("/Game/MaterialTraders/Cards/iron.iron"),
+		TEXT("/Game/MaterialTraders/Cards/silver.silver"), TEXT("/Game/MaterialTraders/Cards/gold.gold"),
+		TEXT("/Game/MaterialTraders/Cards/diamond.diamond"), TEXT("/Game/MaterialTraders/Cards/adamantium.adamantium")
+	};
+	const TCHAR* HandCardNames[] = { TEXT("Rock"), TEXT("Coal"), TEXT("Copper"), TEXT("Iron"), TEXT("Silver"), TEXT("Gold"), TEXT("Diamond"), TEXT("Adamantium") };
+
+	void EnsureHandCardFaces(APawn* Pawn)
+	{
+		if (!Pawn) return;
+		static TWeakObjectPtr<UMaterialInterface> CardBaseMaterial;
+		static TWeakObjectPtr<UTexture2D> HandCardTextures[UE_ARRAY_COUNT(HandCardTexturePaths)];
+		if (!CardBaseMaterial.IsValid()) CardBaseMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/MaterialTraders/Cards/M_Card.M_Card"));
+		if (!CardBaseMaterial.IsValid()) return;
+
+		FArrayProperty* MaterialsProperty = FindFProperty<FArrayProperty>(Pawn->GetClass(), TEXT("CardFrontMaterials"));
+		FObjectPropertyBase* MaterialElement = MaterialsProperty ? CastField<FObjectPropertyBase>(MaterialsProperty->Inner) : nullptr;
+		if (!MaterialsProperty || !MaterialElement) return;
+		FScriptArrayHelper Materials(MaterialsProperty, MaterialsProperty->ContainerPtrToValuePtr<void>(Pawn));
+		bool bRefreshBlueprintCards = Materials.Num() != UE_ARRAY_COUNT(HandCardTexturePaths);
+		if (Materials.Num() != UE_ARRAY_COUNT(HandCardTexturePaths)) Materials.Resize(UE_ARRAY_COUNT(HandCardTexturePaths));
+
+		TArray<FMaterialParameterInfo> TextureParameters;
+		TArray<FGuid> TextureParameterIds;
+		CardBaseMaterial->GetAllTextureParameterInfo(TextureParameters, TextureParameterIds);
+		for (int32 Index = 0; Index < UE_ARRAY_COUNT(HandCardTexturePaths); ++Index)
+		{
+			UMaterialInstanceDynamic* Dynamic = Cast<UMaterialInstanceDynamic>(MaterialElement->GetObjectPropertyValue(Materials.GetRawPtr(Index)));
+			const bool bNeedsTextureSetup = Dynamic == nullptr;
+			if (!Dynamic)
+			{
+				Dynamic = UMaterialInstanceDynamic::Create(CardBaseMaterial.Get(), Pawn);
+				if (!Dynamic) continue;
+				MaterialElement->SetObjectPropertyValue(Materials.GetRawPtr(Index), Dynamic);
+				bRefreshBlueprintCards = true;
+			}
+			if (!HandCardTextures[Index].IsValid()) HandCardTextures[Index] = LoadObject<UTexture2D>(nullptr, HandCardTexturePaths[Index]);
+			UTexture2D* Texture = HandCardTextures[Index].Get();
+			if (!Texture) continue;
+			if (bNeedsTextureSetup)
+				for (const FMaterialParameterInfo& Parameter : TextureParameters)
+					Dynamic->SetTextureParameterValueByInfo(Parameter, Texture);
+		}
+
+		FArrayProperty* NamesProperty = FindFProperty<FArrayProperty>(Pawn->GetClass(), TEXT("CardTypeNames"));
+		FStrProperty* NameElement = NamesProperty ? CastField<FStrProperty>(NamesProperty->Inner) : nullptr;
+		if (NameElement)
+		{
+			FScriptArrayHelper Names(NamesProperty, NamesProperty->ContainerPtrToValuePtr<void>(Pawn));
+			if (Names.Num() != UE_ARRAY_COUNT(HandCardNames))
+			{
+				Names.Resize(UE_ARRAY_COUNT(HandCardNames));
+				bRefreshBlueprintCards = true;
+			}
+			for (int32 Index = 0; Index < UE_ARRAY_COUNT(HandCardNames); ++Index)
+				if (NameElement->GetPropertyValue(Names.GetRawPtr(Index)) != HandCardNames[Index])
+				{
+					NameElement->SetPropertyValue(Names.GetRawPtr(Index), FString(HandCardNames[Index]));
+					bRefreshBlueprintCards = true;
+				}
+		}
+
+		if (bRefreshBlueprintCards)
+			if (UFunction* Refresh = Pawn->FindFunction(TEXT("OnRep_HandCards"))) Pawn->ProcessEvent(Refresh, nullptr);
+	}
+
+	void EnsureBoardCardFaces(AActor* Board)
+	{
+		if (!Board) return;
+		static TWeakObjectPtr<UMaterialInterface> FloatCardBase;
+		static TWeakObjectPtr<UTexture2D> Textures[UE_ARRAY_COUNT(HandCardTexturePaths)];
+		if (!FloatCardBase.IsValid()) FloatCardBase = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/MaterialTraders/Cards/M_CardFloat.M_CardFloat"));
+		if (!FloatCardBase.IsValid()) return;
+
+		FArrayProperty* MaterialsProperty = FindFProperty<FArrayProperty>(Board->GetClass(), TEXT("floatMats"));
+		FObjectPropertyBase* MaterialElement = MaterialsProperty ? CastField<FObjectPropertyBase>(MaterialsProperty->Inner) : nullptr;
+		if (!MaterialsProperty || !MaterialElement) return;
+		FScriptArrayHelper Materials(MaterialsProperty, MaterialsProperty->ContainerPtrToValuePtr<void>(Board));
+		bool bRefreshBoard = Materials.Num() != UE_ARRAY_COUNT(HandCardTexturePaths);
+		if (Materials.Num() != UE_ARRAY_COUNT(HandCardTexturePaths)) Materials.Resize(UE_ARRAY_COUNT(HandCardTexturePaths));
+
+		TArray<FMaterialParameterInfo> Parameters;
+		TArray<FGuid> ParameterIds;
+		FloatCardBase->GetAllTextureParameterInfo(Parameters, ParameterIds);
+		for (int32 Index = 0; Index < UE_ARRAY_COUNT(HandCardTexturePaths); ++Index)
+		{
+			UMaterialInstanceDynamic* Dynamic = Cast<UMaterialInstanceDynamic>(MaterialElement->GetObjectPropertyValue(Materials.GetRawPtr(Index)));
+			const bool bNeedsTextureSetup = Dynamic == nullptr;
+			if (!Dynamic)
+			{
+				Dynamic = UMaterialInstanceDynamic::Create(FloatCardBase.Get(), Board);
+				if (!Dynamic) continue;
+				MaterialElement->SetObjectPropertyValue(Materials.GetRawPtr(Index), Dynamic);
+				bRefreshBoard = true;
+			}
+			if (!Textures[Index].IsValid()) Textures[Index] = LoadObject<UTexture2D>(nullptr, HandCardTexturePaths[Index]);
+			if (bNeedsTextureSetup)
+			if (UTexture2D* Texture = Textures[Index].Get())
+				for (const FMaterialParameterInfo& Parameter : Parameters)
+					Dynamic->SetTextureParameterValueByInfo(Parameter, Texture);
+		}
+		if (bRefreshBoard)
+			if (UFunction* Refresh = Board->FindFunction(TEXT("UpdateVisual"))) Board->ProcessEvent(Refresh, nullptr);
+	}
 
 	/** 1 card: centre. 2 cards: the existing left/right pair. 3+: rows of 3, extra rows stack upwards. */
 	FVector DeckSlotLocal(int32 Index, int32 Count)
@@ -103,14 +214,19 @@ void UOreDealAuctionComponent::ServerPickReveal_Implementation(const TArray<int3
 	if (AOreDealAuctionBroker* B = GetBroker()) B->PickReveal(GetOwnerPlayerState(), RevealIndices);
 }
 
-void UOreDealAuctionComponent::ServerSubmitOffer_Implementation(const TArray<int32>& HandIndices)
+void UOreDealAuctionComponent::ServerSubmitTradeRequest_Implementation(const TArray<int32>& RevealIndices, const TArray<int32>& HandIndices)
 {
-	if (AOreDealAuctionBroker* B = GetBroker()) B->SubmitOffer(GetOwnerPlayerState(), HandIndices);
+	if (AOreDealAuctionBroker* B = GetBroker()) B->SubmitRequest(GetOwnerPlayerState(), RevealIndices, HandIndices);
 }
 
-void UOreDealAuctionComponent::ServerSelectLot_Implementation(const TArray<int32>& PoolIndices)
+void UOreDealAuctionComponent::ServerCancelTradeRequest_Implementation()
 {
-	if (AOreDealAuctionBroker* B = GetBroker()) B->SelectLot(GetOwnerPlayerState(), PoolIndices);
+	if (AOreDealAuctionBroker* B = GetBroker()) B->CancelRequest(GetOwnerPlayerState());
+}
+
+void UOreDealAuctionComponent::ServerResolveTradeRequest_Implementation(bool bAccept)
+{
+	if (AOreDealAuctionBroker* B = GetBroker()) B->ResolveRequest(GetOwnerPlayerState(), bAccept);
 }
 
 void UOreDealAuctionComponent::ServerFocusPartner_Implementation(APlayerState* Target)
@@ -126,6 +242,11 @@ void UOreDealAuctionComponent::ServerChoosePartner_Implementation(APlayerState* 
 void UOreDealAuctionComponent::ServerPlacePending_Implementation(int32 WagonIndex)
 {
 	if (AOreDealAuctionBroker* B = GetBroker()) B->PlacePending(GetOwnerPlayerState(), WagonIndex);
+}
+
+void UOreDealAuctionComponent::ServerReturnPending_Implementation()
+{
+	if (AOreDealAuctionBroker* B = GetBroker()) B->ReturnPending(GetOwnerPlayerState());
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -164,6 +285,16 @@ bool UOreDealAuctionComponent::IsActivePlayer() const
 	return Broker.IsValid() && GetOwnerPlayerState() && Broker->GetActivePlayer() == GetOwnerPlayerState();
 }
 
+bool UOreDealAuctionComponent::HandlePlayerClick(APlayerState* TargetPlayer)
+{
+	if (!IsLocallyOwned() || !TargetPlayer || !Broker.IsValid() || !IsActivePlayer() || Broker->GetStage() != EOreDealAuctionStage::PickReveal) return false;
+	const FOreDealAuctionSeat* Request = Broker->FindSeat(TargetPlayer);
+	if (!Request || !Request->bConfirmed || Request->RequestedRevealIndices.IsEmpty()) return false;
+	BeginAwait();
+	ServerChoosePartner(TargetPlayer);
+	return true;
+}
+
 void UOreDealAuctionComponent::GetLocalHand(TArray<int32>& OutCards) const
 {
 	OutCards.Reset();
@@ -200,16 +331,28 @@ EOreDealAuctionLocalMode UOreDealAuctionComponent::ComputeMode() const
 	switch (Broker->GetStage())
 	{
 	case EOreDealAuctionStage::Idle: return EOreDealAuctionLocalMode::None;
-	case EOreDealAuctionStage::PickReveal: return bActive ? EOreDealAuctionLocalMode::PickReveal : EOreDealAuctionLocalMode::Waiting;
-	case EOreDealAuctionStage::ActiveOffer: return bActive ? EOreDealAuctionLocalMode::HandPick : EOreDealAuctionLocalMode::Waiting;
-	case EOreDealAuctionStage::SelectLot: return bActive ? EOreDealAuctionLocalMode::LotPick : EOreDealAuctionLocalMode::Waiting;
-	case EOreDealAuctionStage::Bidding:
+	case EOreDealAuctionStage::PickReveal:
 	{
-		if (bActive) return EOreDealAuctionLocalMode::Waiting;
-		const FOreDealAuctionSeat* Seat = Broker->FindSeat(GetOwnerPlayerState());
-		return Seat && !Seat->bConfirmed ? EOreDealAuctionLocalMode::HandPick : EOreDealAuctionLocalMode::Waiting;
+		if (bPlantHandMode) return EOreDealAuctionLocalMode::HandPlant;
+		if (bActive)
+		{
+			TArray<APlayerState*> Requests;
+			GetOfferers(Requests);
+			return bActiveRequestBrowser && !Requests.IsEmpty() ? EOreDealAuctionLocalMode::PartnerPick : EOreDealAuctionLocalMode::PickReveal;
+		}
+		if (!bRequestEditing) return EOreDealAuctionLocalMode::Waiting;
+		return bRequestOfferPhase ? EOreDealAuctionLocalMode::RequestOfferPick : EOreDealAuctionLocalMode::RequestLotPick;
 	}
-	case EOreDealAuctionStage::ChoosePartner: return bActive ? EOreDealAuctionLocalMode::PartnerPick : EOreDealAuctionLocalMode::Waiting;
+	case EOreDealAuctionStage::RequestReview:
+		if (bPlantHandMode) return EOreDealAuctionLocalMode::HandPlant;
+		if (bActive) return EOreDealAuctionLocalMode::RequestReview;
+		if (bRequestEditing) return bRequestOfferPhase ? EOreDealAuctionLocalMode::RequestOfferPick : EOreDealAuctionLocalMode::RequestLotPick;
+		return bPlantHandMode ? EOreDealAuctionLocalMode::HandPlant : EOreDealAuctionLocalMode::Waiting;
+	case EOreDealAuctionStage::ConfirmTrade:
+		if (GetOwnerPlayerState() == Broker->GetFocusedPartner()) return bPlantHandMode ? EOreDealAuctionLocalMode::HandPlant : EOreDealAuctionLocalMode::ConfirmTrade;
+		if (bPlantHandMode) return EOreDealAuctionLocalMode::HandPlant;
+		if (bRequestEditing) return bRequestOfferPhase ? EOreDealAuctionLocalMode::RequestOfferPick : EOreDealAuctionLocalMode::RequestLotPick;
+		return bPlantHandMode ? EOreDealAuctionLocalMode::HandPlant : EOreDealAuctionLocalMode::Waiting;
 	case EOreDealAuctionStage::Consume: return EOreDealAuctionLocalMode::Waiting;
 	default: return EOreDealAuctionLocalMode::None;
 	}
@@ -221,13 +364,13 @@ int32 UOreDealAuctionComponent::GetModeItemCount() const
 	switch (LocalMode)
 	{
 	case EOreDealAuctionLocalMode::PickReveal:
-	case EOreDealAuctionLocalMode::LotPick:
+	case EOreDealAuctionLocalMode::RequestLotPick:
 	{
 		TArray<int32> DeckCards;
 		AOreDealAuctionBroker::GetDeckCards(GetWorld(), DeckCards);
 		return DeckCards.Num();
 	}
-	case EOreDealAuctionLocalMode::HandPick:
+	case EOreDealAuctionLocalMode::RequestOfferPick:
 	{
 		TArray<int32> Hand;
 		GetLocalHand(Hand);
@@ -239,6 +382,7 @@ int32 UOreDealAuctionComponent::GetModeItemCount() const
 		GetOfferers(Offerers);
 		return Offerers.Num();
 	}
+	case EOreDealAuctionLocalMode::HandPlant: return GetMyWagonCount();
 	default: return 0;
 	}
 }
@@ -289,7 +433,12 @@ void UOreDealAuctionComponent::ToggleSelection(int32 Index)
 {
 	if (Index < 0 || Index >= GetModeItemCount()) return;
 	if (Selection.Contains(Index)) Selection.Remove(Index);
-	else Selection.Add(Index);
+	else
+	{
+		const bool bTwoCardLimit = LocalMode == EOreDealAuctionLocalMode::PickReveal || LocalMode == EOreDealAuctionLocalMode::RequestLotPick;
+		if (bTwoCardLimit && Selection.Num() >= 2) return;
+		Selection.Add(Index);
+	}
 }
 
 void UOreDealAuctionComponent::SubmitCurrent()
@@ -303,14 +452,27 @@ void UOreDealAuctionComponent::SubmitCurrent()
 		BeginAwait();
 		ServerPickReveal(Sorted);
 		break;
-	case EOreDealAuctionLocalMode::HandPick:
-		BeginAwait();
-		ServerSubmitOffer(Sorted);
+	case EOreDealAuctionLocalMode::RequestLotPick:
+		if (Sorted.IsEmpty())
+		{
+			bRequestEditing = false;
+			bRequestOfferPhase = false;
+			BeginAwait();
+			ServerCancelTradeRequest();
+			break;
+		}
+		RequestRevealSelection = Sorted;
+		Selection = RequestOfferSelection;
+		bRequestOfferPhase = true;
+		UpdateLocalState();
+		RefreshHud();
 		break;
-	case EOreDealAuctionLocalMode::LotPick:
-		if (Sorted.IsEmpty()) { Flash(TEXT("거래할 카드를 1장 이상 고르세요 (C : 선택)")); break; }
+	case EOreDealAuctionLocalMode::RequestOfferPick:
+		RequestOfferSelection = Sorted;
+		bRequestEditing = false;
+		bRequestOfferPhase = false;
 		BeginAwait();
-		ServerSelectLot(Sorted);
+		ServerSubmitTradeRequest(RequestRevealSelection, Sorted);
 		break;
 	case EOreDealAuctionLocalMode::PartnerPick:
 	{
@@ -319,8 +481,27 @@ void UOreDealAuctionComponent::SubmitCurrent()
 		if (Offerers.IsValidIndex(PartnerCursor)) { BeginAwait(); ServerChoosePartner(Offerers[PartnerCursor]); }
 		break;
 	}
+	case EOreDealAuctionLocalMode::RequestReview:
+		BeginAwait();
+		ServerResolveTradeRequest(true);
+		break;
+	case EOreDealAuctionLocalMode::ConfirmTrade:
+		BeginAwait();
+		ServerResolveTradeRequest(true);
+		break;
 	default: break;
 	}
+}
+
+void UOreDealAuctionComponent::PrepareRequestEditor()
+{
+	RequestRevealSelection.Reset();
+	RequestOfferSelection.Reset();
+	if (!Broker.IsValid()) return;
+	const FOreDealAuctionSeat* Seat = Broker->FindSeat(GetOwnerPlayerState());
+	if (!Seat || !Seat->bConfirmed) return;
+	RequestRevealSelection = Seat->RequestedRevealIndices;
+	RequestOfferSelection = Seat->OfferHandIndices;
 }
 
 bool UOreDealAuctionComponent::HandleInputKey(const FKey& Key, EInputEvent Event)
@@ -328,17 +509,47 @@ bool UOreDealAuctionComponent::HandleInputKey(const FKey& Key, EInputEvent Event
 	if (!IsLocallyOwned() || !GetBroker() || Broker->GetStage() == EOreDealAuctionStage::Idle) return false;
 	UpdateLocalState();
 	const bool bPressed = Event == IE_Pressed || Event == IE_Repeat;
+	const EOreDealAuctionStage Stage = Broker->GetStage();
 
-	// E: the turn cannot move on while trading or while anyone still holds taken cards.
-	if (Key == EKeys::E)
+	if (Key == EKeys::E && bPressed && (Stage == EOreDealAuctionStage::PickReveal || Stage == EOreDealAuctionStage::RequestReview || Stage == EOreDealAuctionStage::ConfirmTrade))
 	{
-		if (!bPressed || !IsActivePlayer()) return bPressed && IsActivePlayer();
-		if (Broker->GetStage() == EOreDealAuctionStage::Consume)
+		bPlantHandMode = !bPlantHandMode;
+		UpdateLocalState();
+		RefreshHud();
+		return true;
+	}
+	if (Key == EKeys::Tab && bPressed && Stage == EOreDealAuctionStage::PickReveal && IsActivePlayer())
+	{
+		bActiveRequestBrowser = !bActiveRequestBrowser;
+		UpdateLocalState();
+		RefreshHud();
+		return true;
+	}
+
+	if (LocalMode == EOreDealAuctionLocalMode::HandPlant)
+	{
+		if (Key != EKeys::A && Key != EKeys::D && Key != EKeys::SpaceBar && Key != EKeys::X) return false;
+		if (!bPressed) return true;
+		TArray<int32> Pending;
+		GetMyPending(Pending);
+		const int32 Wagons = GetMyWagonCount();
+		AOreDealTablePlayerController* TablePC = Cast<AOreDealTablePlayerController>(GetOwnerController());
+		if (TablePC && WagonFocus < 2) WagonFocus = TablePC->GetWagonFocus();
+		if (Key == EKeys::A) WagonFocus = FMath::Max(WagonFocus - 1, 0);
+		else if (Key == EKeys::D) WagonFocus = FMath::Min(WagonFocus + 1, Wagons - 1);
+		else if (Key == EKeys::X && IsActivePlayer() && Stage == EOreDealAuctionStage::PickReveal && !Pending.IsEmpty() && !bAwaitingServer)
 		{
-			const FString Names = Broker->GetUnfinishedPlayerNames();
-			Flash(Names.IsEmpty() ? FString(TEXT("자원 배치를 확인하는 중입니다")) : FString::Printf(TEXT("%s의 자원 배치가 끝나지 않았습니다"), *Names));
+			BeginAwait();
+			ServerReturnPending();
 		}
-		else Flash(TEXT("거래 단계가 진행 중입니다"));
+		else if (!bAwaitingServer)
+		{
+			BeginAwait();
+			if (!Pending.IsEmpty()) ServerPlacePending(FMath::Clamp(WagonFocus, 0, Wagons - 1));
+			else if (TablePC) TablePC->ServerPlantHandCard(FMath::Clamp(WagonFocus, 0, Wagons - 1));
+		}
+		if (TablePC && Key != EKeys::SpaceBar) TablePC->SetWagonFocus(WagonFocus);
+		RefreshHud();
 		return true;
 	}
 
@@ -346,16 +557,15 @@ bool UOreDealAuctionComponent::HandleInputKey(const FKey& Key, EInputEvent Event
 	switch (LocalMode)
 	{
 	case EOreDealAuctionLocalMode::PickReveal:
-	case EOreDealAuctionLocalMode::HandPick:
-	case EOreDealAuctionLocalMode::LotPick:
+	case EOreDealAuctionLocalMode::RequestLotPick:
+	case EOreDealAuctionLocalMode::RequestOfferPick:
 	{
-		// Control rule: cards in the world (덱 위 카드) move with A/D, cards shown only on my screen
-		// (손패 picker) move with Z/X. C toggles a multi-selection, Space decides.
-		const bool bScreenCards = LocalMode == EOreDealAuctionLocalMode::HandPick;
+		const bool bScreenCards = LocalMode == EOreDealAuctionLocalMode::RequestOfferPick;
 		const FKey LeftKey = bScreenCards ? EKeys::Z : EKeys::A;
 		const FKey RightKey = bScreenCards ? EKeys::X : EKeys::D;
 		if (Key == EKeys::Q && bScreenCards) return true; // the picker replaces the Q hand viewer
-		const bool bHandled = Key == LeftKey || Key == RightKey || Key == EKeys::SpaceBar || Key == EKeys::C;
+		const bool bReturn = LocalMode == EOreDealAuctionLocalMode::PickReveal && Key == EKeys::X && IsActivePlayer();
+		const bool bHandled = Key == LeftKey || Key == RightKey || Key == EKeys::SpaceBar || Key == EKeys::C || bReturn;
 		if (!bHandled) return false;
 		if (!bPressed) return true;
 		if ((Key == LeftKey || Key == RightKey) && Count > 0)
@@ -371,6 +581,12 @@ bool UOreDealAuctionComponent::HandleInputKey(const FKey& Key, EInputEvent Event
 				Cursor = Order[FMath::Clamp(Position + Step, 0, Order.Num() - 1)];
 			}
 		}
+		else if (bReturn)
+		{
+			TArray<int32> Pending;
+			GetMyPending(Pending);
+			if (!Pending.IsEmpty() && !bAwaitingServer) { BeginAwait(); ServerReturnPending(); }
+		}
 		else if (Key == EKeys::C) ToggleSelection(Cursor);
 		else if (Key == EKeys::SpaceBar) SubmitCurrent();
 		RefreshHud();
@@ -378,6 +594,7 @@ bool UOreDealAuctionComponent::HandleInputKey(const FKey& Key, EInputEvent Event
 	}
 
 	case EOreDealAuctionLocalMode::PartnerPick:
+		if (Key == EKeys::Tab && bPressed) { bActiveRequestBrowser = false; UpdateLocalState(); RefreshHud(); return true; }
 		if (Key != EKeys::A && Key != EKeys::D && Key != EKeys::SpaceBar) return false;
 		if (!bPressed) return true;
 		if ((Key == EKeys::A || Key == EKeys::D) && Count > 0)
@@ -391,22 +608,51 @@ bool UOreDealAuctionComponent::HandleInputKey(const FKey& Key, EInputEvent Event
 		RefreshHud();
 		return true;
 
+	case EOreDealAuctionLocalMode::RequestReview:
+		if (Key != EKeys::C && Key != EKeys::SpaceBar) return false;
+		if (bPressed)
+		{
+			BeginAwait();
+			ServerResolveTradeRequest(Key == EKeys::C);
+		}
+		return true;
+
+	case EOreDealAuctionLocalMode::ConfirmTrade:
+		if (Key != EKeys::C && Key != EKeys::SpaceBar) return false;
+		if (bPressed)
+		{
+			BeginAwait();
+			ServerResolveTradeRequest(Key == EKeys::C);
+		}
+		return true;
+
 	case EOreDealAuctionLocalMode::Waiting:
 	default:
 	{
-		// Taken cards: A/D picks the wagon, Space places the front card. Hand placement is blocked meanwhile.
-		TArray<int32> Pending;
-		GetMyPending(Pending);
-		if (Pending.IsEmpty()) return false;
-		if (Key != EKeys::A && Key != EKeys::D && Key != EKeys::SpaceBar) return false;
-		if (!bPressed) return true;
-		// Placing waits until the trade is over (all 덱 위 카드 gone). Keys are still swallowed so
-		// nothing else (hand placement) happens meanwhile.
-		if (Broker->GetStage() != EOreDealAuctionStage::Consume)
+		// C reopens a live request; E switches to hand planting during the trade stage.
+		const bool bCanRequest = Stage == EOreDealAuctionStage::PickReveal || Stage == EOreDealAuctionStage::RequestReview || Stage == EOreDealAuctionStage::ConfirmTrade;
+		const bool bFocusedFinalDecision = Stage == EOreDealAuctionStage::ConfirmTrade && GetOwnerPlayerState() == Broker->GetFocusedPartner();
+		if (bCanRequest && !bFocusedFinalDecision && Key == EKeys::C && bPressed && !IsActivePlayer())
 		{
-			if (Key == EKeys::SpaceBar) Flash(TEXT("덱 위 카드가 모두 거래된 뒤에 가져온 카드를 배치할 수 있습니다"));
+			bRequestEditing = true;
+			bRequestOfferPhase = false;
+			PrepareRequestEditor();
+			UpdateLocalState();
+			RefreshHud();
 			return true;
 		}
+		if (bCanRequest && Key == EKeys::E && bPressed)
+		{
+			bPlantHandMode = true;
+			UpdateLocalState();
+			RefreshHud();
+			return true;
+		}
+		TArray<int32> Pending;
+		GetMyPending(Pending);
+		if (Pending.IsEmpty() || (Stage != EOreDealAuctionStage::Consume && Stage != EOreDealAuctionStage::PickReveal)) return false;
+		if (Key != EKeys::A && Key != EKeys::D && Key != EKeys::SpaceBar) return false;
+		if (!bPressed) return true;
 		const int32 Wagons = GetMyWagonCount();
 		AOreDealTablePlayerController* TablePC = Cast<AOreDealTablePlayerController>(GetOwnerController());
 		if (TablePC && WagonFocus < 2) WagonFocus = TablePC->GetWagonFocus();
@@ -447,20 +693,39 @@ void UOreDealAuctionComponent::UpdateLocalState()
 	if (!Broker.IsValid()) { LocalMode = EOreDealAuctionLocalMode::None; return; }
 	const EOreDealAuctionLocalMode NewMode = ComputeMode();
 	const uint8 Stage = static_cast<uint8>(Broker->GetStage());
-	// A rejected request (e.g. invalid wagon) changes nothing, so stop waiting after a short timeout.
+	const bool bStageChanged = Stage != LastStage;
+	const bool bModeChanged = NewMode != LocalMode;
 	const bool bAwaitTimedOut = bAwaitingServer && GetWorld() && GetWorld()->GetRealTimeSeconds() - AwaitStartTime > 1.5;
 	const bool bServerAnswered = bAwaitingServer && (Broker->GetRevision() != AwaitRevision || bAwaitTimedOut);
-	if (NewMode != LocalMode || Stage != LastStage || bServerAnswered)
+	if (bStageChanged)
 	{
-		Cursor = 0;
-		Selection.Reset();
-		bAwaitingServer = false;
-		if (NewMode == EOreDealAuctionLocalMode::PickReveal || NewMode == EOreDealAuctionLocalMode::LotPick)
+		bPlantHandMode = false;
+		bActiveRequestBrowser = false;
+		if (Broker->GetStage() == EOreDealAuctionStage::PickReveal)
 		{
-			// Start on the card at the bottom-left of this player's view.
+			bRequestEditing = !IsActivePlayer();
+			bRequestOfferPhase = false;
+			RequestRevealSelection.Reset();
+			RequestOfferSelection.Reset();
+		}
+	}
+	if (bModeChanged || bStageChanged || bServerAnswered)
+	{
+		if (bModeChanged || bStageChanged) { Cursor = 0; Selection.Reset(); }
+		if (bModeChanged)
+			if (AOreDealTablePlayerController* TablePC = Cast<AOreDealTablePlayerController>(GetOwnerController()))
+				TablePC->SetAuctionModalInput(NewMode == EOreDealAuctionLocalMode::RequestReview || NewMode == EOreDealAuctionLocalMode::ConfirmTrade);
+		bAwaitingServer = false;
+		if (NewMode == EOreDealAuctionLocalMode::PickReveal || NewMode == EOreDealAuctionLocalMode::RequestLotPick)
+		{
 			TArray<int32> Order;
 			GetDeckVisualOrder(Order);
 			if (!Order.IsEmpty()) Cursor = Order[0];
+			if (NewMode == EOreDealAuctionLocalMode::RequestLotPick) Selection = RequestRevealSelection;
+		}
+		else if (NewMode == EOreDealAuctionLocalMode::RequestOfferPick)
+		{
+			Selection = RequestOfferSelection;
 		}
 		if (NewMode == EOreDealAuctionLocalMode::PartnerPick)
 		{
@@ -471,6 +736,7 @@ void UOreDealAuctionComponent::UpdateLocalState()
 	}
 	LocalMode = NewMode;
 	LastStage = Stage;
+	LastSeenBrokerRevision = Broker->GetRevision();
 	const int32 Count = GetModeItemCount();
 	if (LocalMode == EOreDealAuctionLocalMode::PartnerPick) PartnerCursor = Count > 0 ? FMath::Clamp(PartnerCursor, 0, Count - 1) : 0;
 	else Cursor = Count > 0 ? FMath::Clamp(Cursor, 0, Count - 1) : 0;
@@ -482,12 +748,26 @@ void UOreDealAuctionComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 	if (!IsLocallyOwned() || !GetWorld()) return;
+	HandCardMaterialRefreshElapsed += DeltaTime;
+	if (HandCardMaterialRefreshElapsed >= 0.05f)
+	{
+		HandCardMaterialRefreshElapsed = 0.0f;
+		for (TActorIterator<APawn> It(GetWorld()); It; ++It) EnsureHandCardFaces(*It);
+		for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+			if (*It && (*It)->GetClass()->GetName() == TEXT("BP_CardBoard_C")) EnsureBoardCardFaces(*It);
+	}
 	GetBroker();
 
 	if (!Hud)
 	{
 		Hud = CreateWidget<UOreDealAuctionHudWidget>(GetOwnerController(), UOreDealAuctionHudWidget::StaticClass());
-		if (Hud) Hud->AddToViewport(30500);
+		if (Hud)
+		{
+			Hud->SetTradeDecisionCallbacks(
+				FSimpleDelegate::CreateLambda([this]() { if (!bAwaitingServer) { BeginAwait(); ServerResolveTradeRequest(true); } }),
+				FSimpleDelegate::CreateLambda([this]() { if (!bAwaitingServer) { BeginAwait(); ServerResolveTradeRequest(false); } }));
+			Hud->AddToViewport(30500);
+		}
 	}
 	if (!Display.IsValid())
 	{
@@ -519,81 +799,58 @@ void UOreDealAuctionComponent::RefreshHud()
 		Hud->ApplyState(State);
 		return;
 	}
-	const bool bActive = IsActivePlayer();
-	const FString ActiveName = AOreDealAuctionBroker::GetDisplayName(Broker->GetActivePlayer());
-	TArray<APlayerState*> Offerers;
-	GetOfferers(Offerers);
-
-	switch (Broker->GetStage())
+	const bool bRequestPick = LocalMode == EOreDealAuctionLocalMode::RequestOfferPick;
+	switch (LocalMode)
 	{
-	case EOreDealAuctionStage::PickReveal:
-		State.Status = bActive ? FString(TEXT("▶ 덱 위 카드 중 가져갈 카드를 고르세요 (선택 안 하고 Space: 모두 거래)   ·   A / D 이동   ·   C 선택   ·   Space 결정"))
-		                       : FString::Printf(TEXT("%s 님이 가져갈 카드를 고르는 중..."), *ActiveName);
-		break;
-	case EOreDealAuctionStage::ActiveOffer:
-		State.Status = bActive ? FString(TEXT("▶ 거래에 올릴 손패를 고르세요"))
-		                       : FString::Printf(TEXT("%s 님이 거래에 올릴 카드를 고르는 중..."), *ActiveName);
-		State.PickerHint = TEXT("Z / X 이동   ·   C 선택   ·   Space 결정   (안 올리려면 그냥 Space)");
-		break;
-	case EOreDealAuctionStage::SelectLot:
-	{
-		TArray<int32> DeckCards;
-		AOreDealAuctionBroker::GetDeckCards(GetWorld(), DeckCards);
-		const FString SubNotice = DeckCards.Num() > 1 ? TEXT("(1장 또는 2장 동시 선택 가능)") : TEXT("(1장 선택)");
-		State.Status = bActive ? FString::Printf(TEXT("▶ 남아있는 카드 중 이번에 거래할 카드를 고르세요 %s   ·   A / D 이동   ·   C 선택   ·   Space 결정"), *SubNotice)
-		                       : FString::Printf(TEXT("%s 님이 거래할 카드를 고르는 중..."), *ActiveName);
-		break;
-	}
-	case EOreDealAuctionStage::Bidding:
-	{
-		int32 Confirmed = 0, Total = 0;
-		Broker->GetBiddingProgress(Confirmed, Total);
-		if (LocalMode == EOreDealAuctionLocalMode::HandPick)
-			State.Status = TEXT("▶ 강조된 거래 카드와 바꿀 손패(제안 카드)를 고르세요");
-		else if (bActive)
-			State.Status = FString::Printf(TEXT("다른 플레이어들이 내밀 카드를 고르는 중... (%d / %d 결정)"), Confirmed, Total);
-		else
-			State.Status = FString::Printf(TEXT("결정 완료   ·   다른 플레이어를 기다리는 중... (%d / %d)"), Confirmed, Total);
-		State.PickerHint = TEXT("Z / X 이동   ·   C 선택   ·   Space 결정   (거래하지 않으려면 그냥 Space)");
-		break;
-	}
-	case EOreDealAuctionStage::ChoosePartner:
-	{
-		const APlayerState* Focus = bActive && Offerers.IsValidIndex(PartnerCursor) ? Offerers[PartnerCursor] : Broker->GetFocusedPartner();
-		const FString FocusName = AOreDealAuctionBroker::GetDisplayName(Focus);
-		State.Status = bActive ? FString::Printf(TEXT("▶ 거래할 상대를 고르세요   ·   A / D 이동   ·   Space 결정      현재 : %s"), *FocusName)
-		                       : FString::Printf(TEXT("%s 님이 거래 상대를 고르는 중...   (현재 : %s)"), *ActiveName, *FocusName);
-		break;
-	}
-	case EOreDealAuctionStage::Consume:
-	{
-		TArray<int32> MyPending;
-		GetMyPending(MyPending);
-		const FString Names = Broker->GetUnfinishedPlayerNames();
-		if (!MyPending.IsEmpty()) State.Status = TEXT("▶ 가져온 카드를 마차에 배치하세요   ·   A / D 마차 선택   ·   Space 배치");
-		else State.Status = Names.IsEmpty() ? FString() : FString::Printf(TEXT("%s의 자원 배치가 끝나지 않았습니다"), *Names);
-		break;
-	}
+	case EOreDealAuctionLocalMode::PickReveal:
+		State.PickerHint = TEXT("가져가기: A/D 이동 · C 선택 · Space 결정\n요청 확인: 플레이어 클릭 / Tab\n취소: X · 손패 심기: E"); break;
+	case EOreDealAuctionLocalMode::RequestLotPick:
+		State.PickerHint = TEXT("거래 요청: 중앙 카드 0~2장 선택 · C 선택 · Space 다음"); break;
+	case EOreDealAuctionLocalMode::RequestOfferPick:
+		State.PickerHint = TEXT("대가 손패 0장 이상 선택 · Z/X 이동 · C 선택 · Space 요청 확정"); break;
+	case EOreDealAuctionLocalMode::PartnerPick:
+		State.PickerHint = TEXT("요청 선택: A/D 이동 · Space 검토\n중앙 카드로 복귀: Tab"); break;
+	case EOreDealAuctionLocalMode::RequestReview:
+		State.PickerHint = TEXT("거래 요청 검토 · C 수락 · Space 거절"); break;
+	case EOreDealAuctionLocalMode::ConfirmTrade:
+		State.PickerHint = TEXT("거래 최종 결정 · C 수락 · Space 거절"); break;
+	case EOreDealAuctionLocalMode::HandPlant:
+		State.PickerHint = TEXT("마차 선택: A/D\n손패 심기: Space · 취소: X · 종료: E"); break;
+	case EOreDealAuctionLocalMode::Waiting:
+		State.PickerHint = TEXT("거래 요청 작성 / 수정: C · 손패 심기: E · 대기 중"); break;
 	default: break;
 	}
-
-	if (!State.Status.IsEmpty() && Broker->GetStage() != EOreDealAuctionStage::Idle)
-	{
-		State.Status += FString::Printf(TEXT("   [덱: %d장 · 소진: %d/%d]"),
-			Broker->GetRemainingDeckCount(), Broker->GetDeckDepletionCount(), Broker->GetMaxDeckDepletions());
-	}
-
-	if (LocalMode == EOreDealAuctionLocalMode::HandPick)
+	if (bRequestPick)
 	{
 		State.bPickerOpen = true;
 		GetLocalHand(State.PickerCards);
-		State.PickerCursor = Cursor;
+		State.PickerCursor = LocalMode == EOreDealAuctionLocalMode::RequestOfferPick ? Cursor : 0;
 		State.PickerSelected = Selection;
 	}
 	GetMyPending(State.PendingCards);
 	State.WagonCount = GetMyWagonCount();
 	State.WagonFocus = WagonFocus;
-	State.bPendingInputEnabled = LocalMode == EOreDealAuctionLocalMode::Waiting && Broker->GetStage() == EOreDealAuctionStage::Consume;
+	State.bPendingInputEnabled = LocalMode == EOreDealAuctionLocalMode::Waiting || LocalMode == EOreDealAuctionLocalMode::HandPlant;
+	State.bTradeModalVisible = LocalMode == EOreDealAuctionLocalMode::RequestReview || LocalMode == EOreDealAuctionLocalMode::ConfirmTrade;
+	if (State.bTradeModalVisible)
+	{
+		const APlayerState* Requester = Broker->GetFocusedPartner();
+		const FOreDealAuctionSeat* Seat = Broker->FindSeat(Requester);
+		if (Seat)
+		{
+			static const TCHAR* Names[] = { TEXT("돌"), TEXT("석탄"), TEXT("구리"), TEXT("철"), TEXT("은"), TEXT("금"), TEXT("다이아몬드"), TEXT("아다만티움") };
+			TArray<int32> Central;
+			AOreDealAuctionBroker::GetDeckCards(GetWorld(), Central);
+			TArray<FString> Wanted, Payment;
+			for (int32 Index : Seat->RequestedRevealIndices)
+				if (Central.IsValidIndex(Index)) { Wanted.Add(Names[FMath::Clamp(Central[Index], 0, UE_ARRAY_COUNT(Names) - 1)]); State.TradeWantedCards.Add(Central[Index]); }
+			for (int32 Card : Seat->OfferCards) { Payment.Add(Names[FMath::Clamp(Card, 0, UE_ARRAY_COUNT(Names) - 1)]); State.TradeOfferedCards.Add(Card); }
+			State.TradeModalText = FString::Printf(TEXT("%s의 거래 요청\n가져갈 카드: %s\n대가 카드: %s"),
+				*AOreDealAuctionBroker::GetDisplayName(Requester), *FString::Join(Wanted, TEXT(", ")),
+				Payment.IsEmpty() ? TEXT("없음") : *FString::Join(Payment, TEXT(", ")));
+			State.TradeAcceptLabel = TEXT("거래한다");
+		}
+	}
 	Hud->ApplyState(State);
 }
 
@@ -639,12 +896,14 @@ void UOreDealAuctionComponent::RefreshDisplay()
 
 		TArray<int32> DeckCards;
 		AOreDealAuctionBroker::GetDeckCards(GetWorld(), DeckCards);
-		const bool bLotShown = Broker->GetStage() == EOreDealAuctionStage::Bidding || Broker->GetStage() == EOreDealAuctionStage::ChoosePartner;
-		const bool bLocalWorldPick = LocalMode == EOreDealAuctionLocalMode::PickReveal || LocalMode == EOreDealAuctionLocalMode::LotPick;
+		const bool bLotShown = Broker->GetStage() == EOreDealAuctionStage::RequestReview || Broker->GetStage() == EOreDealAuctionStage::ConfirmTrade;
+		const bool bLocalWorldPick = LocalMode == EOreDealAuctionLocalMode::PickReveal || LocalMode == EOreDealAuctionLocalMode::RequestLotPick;
+		const FOreDealAuctionSeat* FocusedSeat = Broker->FindSeat(Broker->GetFocusedPartner());
 		for (int32 I = 0; I < DeckCards.Num(); ++I)
 		{
 			const bool bCursor = bLocalWorldPick && I == Cursor;
-			const bool bGlow = bCursor || (bLotShown && Broker->GetLotIndices().Contains(I)) ||
+			const bool bRequestGlow = FocusedSeat && FocusedSeat->RequestedRevealIndices.Contains(I);
+			const bool bGlow = bCursor || (bLotShown && bRequestGlow) ||
 				(bLocalWorldPick && Selection.Contains(I));
 			Add(Deck->GetActorTransform().TransformPosition(DeckSlotLocal(I, DeckCards.Num())), 1.0f, DeckCards[I], bGlow, bCursor);
 		}
@@ -660,13 +919,43 @@ void UOreDealAuctionComponent::RefreshDisplay()
 	{
 		const APawn* Pawn = IsValid(Seat.Player) ? Seat.Player->GetPawn() : nullptr;
 		if (!Pawn) continue;
+		const bool bShowRequestMarker = Stage != EOreDealAuctionStage::Idle && Seat.Player != Broker->GetActivePlayer() && Seat.bConfirmed && !Seat.RequestedRevealIndices.IsEmpty();
+		TWeakObjectPtr<APawn> PawnKey(const_cast<APawn*>(Pawn));
+		TWeakObjectPtr<UTextRenderComponent>& MarkerRef = RequestMarkers.FindOrAdd(PawnKey);
+		if (bShowRequestMarker)
+		{
+			UTextRenderComponent* Marker = MarkerRef.Get();
+			if (!Marker)
+			{
+				Marker = NewObject<UTextRenderComponent>(const_cast<APawn*>(Pawn), NAME_None, RF_Transient);
+				if (Marker)
+				{
+					Marker->SetText(FText::FromString(TEXT("!")));
+					Marker->SetTextRenderColor(FColor(255, 205, 30));
+					Marker->SetWorldSize(72.0f);
+					Marker->SetHorizontalAlignment(EHTA_Center);
+					Marker->SetVerticalAlignment(EVRTA_TextCenter);
+					Marker->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+					Marker->RegisterComponent();
+					MarkerRef = Marker;
+				}
+			}
+			if (Marker)
+			{
+				const FVector MarkerLocation(Pawn->GetActorLocation().X, Pawn->GetActorLocation().Y, HeadTopZ(Pawn) + 48.0f);
+				Marker->SetWorldLocation(MarkerLocation);
+				Marker->SetWorldRotation(FRotator(0.0f, CameraRotation.Yaw + 180.0f, 0.0f));
+				Marker->SetVisibility(true);
+			}
+		}
+		else if (UTextRenderComponent* Marker = MarkerRef.Get()) Marker->SetVisibility(false);
 
-		// Offered cards float above the player's head, slightly towards the table, for everyone to see.
-		if ((Stage == EOreDealAuctionStage::Bidding || Stage == EOreDealAuctionStage::ChoosePartner) && Seat.bConfirmed && !Seat.OfferCards.IsEmpty())
+		// A large exclamation mark signals a completed request; offer cards appear in the review UI.
+		if (!bShowRequestMarker && Stage != EOreDealAuctionStage::Idle && Seat.bConfirmed && !Seat.OfferCards.IsEmpty())
 		{
 			const FVector ToCenter = (TableCenter - Pawn->GetActorLocation()).GetSafeNormal2D();
 			const FVector Base(Pawn->GetActorLocation().X + ToCenter.X * 18.0f, Pawn->GetActorLocation().Y + ToCenter.Y * 18.0f, HeadTopZ(Pawn) + 12.0f);
-			const bool bGlow = Stage == EOreDealAuctionStage::ChoosePartner && Seat.Player == FocusedPartner;
+			const bool bGlow = (Stage == EOreDealAuctionStage::RequestReview || Stage == EOreDealAuctionStage::ConfirmTrade) && Seat.Player == FocusedPartner;
 			for (int32 I = 0; I < Seat.OfferCards.Num(); ++I)
 				Add(GridLocation(I, Seat.OfferCards.Num(), OfferPerRow, Base, Right, OfferColumnStep, OfferRowStep), OfferCardScale, Seat.OfferCards[I], bGlow, false);
 		}

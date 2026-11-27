@@ -5,6 +5,7 @@
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Components/Widget.h"
 #include "Engine/TextRenderActor.h"
 #include "Engine/World.h"
@@ -24,7 +25,6 @@ namespace
 	const FRotator RestingLeftHandRotation(0.0f, -90.0f, 90.0f); // pitch, yaw, roll
 	const FVector RestingLeftHandScale(2.0f, 2.0f, 2.0f);
 	const TCHAR* RestingLeftHandAnimPath = TEXT("/Game/Asset/Hands/SK_Hand_LRelax.SK_Hand_LRelax");
-
 	bool IsClassNamed(const AActor* Actor, const TCHAR* ClassName)
 	{
 		return Actor && Actor->GetClass()->GetName() == ClassName;
@@ -80,7 +80,7 @@ void UOreDealPreGameComponent::ApplyTableActors(bool bWaiting)
 	for (TActorIterator<AActor> It(World); It; ++It)
 	{
 		AActor* Actor = *It;
-		if (Actor->ActorHasTag(MerchantTag)) { Targets.Add(Actor); Merchants.Add(Actor); }
+		if (Actor && Actor->ActorHasTag(MerchantTag)) { Targets.Add(Actor); Merchants.Add(Actor); }
 	}
 	// Merchant name signs are untagged TextRenderActors standing on each merchant counter.
 	for (TActorIterator<ATextRenderActor> It(World); It; ++It)

@@ -216,7 +216,7 @@ void AOreDealAuctionBroker::GetOfferers(TArray<APlayerState*>& OutPlayers) const
 {
 	OutPlayers.Reset();
 	for (const FOreDealAuctionSeat& Seat : Seats)
-		if (Seat.Player != ActivePlayer && IsValid(Seat.Player) && Seat.bConfirmed && !Seat.OfferCards.IsEmpty())
+		if (Seat.Player != ActivePlayer && IsValid(Seat.Player) && Seat.bConfirmed && !Seat.RequestedRevealIndices.IsEmpty())
 			OutPlayers.Add(Seat.Player);
 }
 
@@ -303,7 +303,12 @@ void AOreDealAuctionBroker::Tick(float DeltaSeconds)
 		return;
 	}
 	// A bidder may have left mid-auction; re-check so the table never waits for nobody.
-	if (Stage == EOreDealAuctionStage::Bidding && AllOthersConfirmed()) ResolveBids();
+	if (Stage == EOreDealAuctionStage::PickReveal)
+	{
+		TArray<int32> CentralCards;
+		GetDeckCards(GetWorld(), CentralCards);
+		if (CentralCards.IsEmpty() && !HasReturnablePending()) EnterConsume();
+	}
 }
 
 void AOreDealAuctionBroker::Start(AActor* Deck, APlayerState* TurnPlayer)
@@ -361,6 +366,7 @@ void AOreDealAuctionBroker::ClearOffers()
 	{
 		Seat.OfferHandIndices.Reset();
 		Seat.OfferCards.Reset();
+		Seat.RequestedRevealIndices.Reset();
 		Seat.bConfirmed = false;
 	}
 	FocusedPartner = nullptr;
@@ -372,177 +378,247 @@ void AOreDealAuctionBroker::PickReveal(APlayerState* Player, const TArray<int32>
 	TArray<int32> DeckCards;
 	GetDeckCards(GetWorld(), DeckCards);
 	FOreDealAuctionSeat* Seat = FindSeatMutable(ActivePlayer);
-	if (!Seat || !IsValidUniqueIndexList(RevealIndices, DeckCards.Num())) return;
-	// Taken cards become 가져온 카드 in deck order; the rest stay on the deck.
+	if (!Seat || RevealIndices.Num() > 2 || !IsValidUniqueIndexList(RevealIndices, DeckCards.Num())) return;
+	// Taking zero cards means the active player is choosing to trade/review requests instead.
+	if (RevealIndices.IsEmpty()) { Touch(); return; }
 	TArray<int32> Sorted = RevealIndices;
 	Sorted.Sort();
-	for (int32 Index : Sorted) Seat->PendingCards.Add(DeckCards[Index]);
+	for (int32 Index : Sorted) { Seat->PendingCards.Add(DeckCards[Index]); Seat->PendingReturnable.Add(1); }
 	for (int32 I = Sorted.Num() - 1; I >= 0; --I) DeckCards.RemoveAt(Sorted[I]);
 	WriteDeckCards(DeckCards);
-	// Nothing left on the deck: skip the trade and go straight to placing 가져온 카드.
-	if (DeckCards.IsEmpty())
+	// Rebase live requests after cards are removed from the central row. A request that
+	// loses all of its requested cards is withdrawn and can be edited again.
+	for (FOreDealAuctionSeat& Requester : Seats)
+	{
+		if (Requester.Player == ActivePlayer || !Requester.bConfirmed) continue;
+		TArray<int32> Rebased;
+		for (int32 RequestedIndex : Requester.RequestedRevealIndices)
+		{
+			if (Sorted.Contains(RequestedIndex)) continue;
+			int32 Shift = 0;
+			for (int32 RemovedIndex : Sorted) if (RemovedIndex < RequestedIndex) ++Shift;
+			Rebased.Add(RequestedIndex - Shift);
+		}
+		Requester.RequestedRevealIndices = MoveTemp(Rebased);
+		if (Requester.RequestedRevealIndices.IsEmpty())
+		{
+			Requester.OfferHandIndices.Reset();
+			Requester.OfferCards.Reset();
+			Requester.bConfirmed = false;
+		}
+	}
+	FocusedPartner = nullptr;
+	if (DeckCards.IsEmpty() && !HasReturnablePending())
 	{
 		EnterConsume();
 		return;
 	}
-	Stage = EOreDealAuctionStage::SelectLot;
 	Touch();
 }
 
-void AOreDealAuctionBroker::SubmitOffer(APlayerState* Player, const TArray<int32>& HandIndices)
+void AOreDealAuctionBroker::SubmitRequest(APlayerState* Player, const TArray<int32>& RevealIndices, const TArray<int32>& HandIndices)
 {
-	if (!HasAuthority() || !IsValid(Player)) return;
+	if (!HasAuthority() || (Stage != EOreDealAuctionStage::PickReveal && Stage != EOreDealAuctionStage::RequestReview && Stage != EOreDealAuctionStage::ConfirmTrade) || !IsValid(Player) || Player == ActivePlayer || (Stage == EOreDealAuctionStage::ConfirmTrade && Player == FocusedPartner)) return;
+	FOreDealAuctionSeat* Seat = FindSeatMutable(Player);
+	TArray<int32> CentralCards;
 	TArray<int32> Hand;
-	if (!ReadHand(Player, Hand) || !IsValidUniqueIndexList(HandIndices, Hand.Num())) return;
+	GetDeckCards(GetWorld(), CentralCards);
+	if (!Seat || !ReadHand(Player, Hand) || RevealIndices.Num() > 2 || !IsValidUniqueIndexList(RevealIndices, CentralCards.Num()) || !IsValidUniqueIndexList(HandIndices, Hand.Num())) return;
+	if (RevealIndices.IsEmpty()) { CancelRequest(Player); return; }
+	Seat->RequestedRevealIndices = RevealIndices;
+	Seat->RequestedRevealIndices.Sort();
+	Seat->OfferHandIndices = HandIndices;
+	Seat->OfferHandIndices.Sort();
+	Seat->OfferCards.Reset();
+	for (int32 Index : Seat->OfferHandIndices) Seat->OfferCards.Add(Hand[Index]);
+	Seat->bConfirmed = true;
+	Touch();
+}
 
-	if (Stage == EOreDealAuctionStage::ActiveOffer && Player == ActivePlayer)
+void AOreDealAuctionBroker::CancelRequest(APlayerState* Player)
+{
+	if (!HasAuthority() || (Stage != EOreDealAuctionStage::PickReveal && Stage != EOreDealAuctionStage::RequestReview && Stage != EOreDealAuctionStage::ConfirmTrade) || !IsValid(Player) || Player == ActivePlayer || (Stage == EOreDealAuctionStage::ConfirmTrade && Player == FocusedPartner)) return;
+	if (FOreDealAuctionSeat* Seat = FindSeatMutable(Player))
 	{
-		// The turn player's offered cards leave the hand now and are pushed onto the deck-top array.
-		TArray<int32> Removed;
-		if (!HandIndices.IsEmpty() && !RemoveHandIndices(Player, HandIndices, &Removed)) return;
-		TArray<int32> DeckCards;
-		GetDeckCards(GetWorld(), DeckCards);
-		DeckCards.Append(Removed);
-		WriteDeckCards(DeckCards);
-		if (DeckCards.IsEmpty()) EnterConsume();
-		else
-		{
-			Stage = EOreDealAuctionStage::SelectLot;
-			Touch();
-		}
-		return;
-	}
-
-	if (Stage == EOreDealAuctionStage::Bidding && Player != ActivePlayer)
-	{
-		FOreDealAuctionSeat* Seat = FindSeatMutable(Player);
-		if (!Seat || Seat->bConfirmed) return;
-		TArray<int32> Sorted = HandIndices;
-		Sorted.Sort();
-		Seat->OfferHandIndices = Sorted;
+		Seat->RequestedRevealIndices.Reset();
+		Seat->OfferHandIndices.Reset();
 		Seat->OfferCards.Reset();
-		for (int32 Index : Sorted) Seat->OfferCards.Add(Hand[Index]);
-		Seat->bConfirmed = true;
+		Seat->bConfirmed = false;
 		Touch();
-		if (AllOthersConfirmed()) ResolveBids();
 	}
-}
-
-void AOreDealAuctionBroker::SelectLot(APlayerState* Player, const TArray<int32>& PoolIndices)
-{
-	if (!HasAuthority() || Stage != EOreDealAuctionStage::SelectLot || Player != ActivePlayer) return;
-	TArray<int32> DeckCards;
-	GetDeckCards(GetWorld(), DeckCards);
-	if (PoolIndices.IsEmpty() || !IsValidUniqueIndexList(PoolIndices, DeckCards.Num())) return;
-	ClearOffers();
-	LotIndices = PoolIndices;
-	LotIndices.Sort();
-	Stage = EOreDealAuctionStage::Bidding;
-	Touch();
-	if (AllOthersConfirmed()) ResolveBids();
-}
-
-void AOreDealAuctionBroker::ResolveBids()
-{
-	TArray<APlayerState*> Offerers;
-	GetOfferers(Offerers);
-	if (Offerers.IsEmpty())
-	{
-		// Nobody wants the highlighted cards: they go to the turn player's taken cards.
-		TArray<int32> Lot;
-		CollectLot(Lot);
-		if (FOreDealAuctionSeat* ActiveSeat = FindSeatMutable(ActivePlayer)) ActiveSeat->PendingCards.Append(Lot);
-		AfterLotResolved();
-		return;
-	}
-	int32 Others = 0;
-	for (const FOreDealAuctionSeat& Seat : Seats)
-		if (Seat.Player != ActivePlayer && IsValid(Seat.Player)) ++Others;
-	if (Others == 1)
-	{
-		// Two-player game: the only opponent offered, so the trade happens without a pick.
-		ExecuteTrade(Offerers[0]);
-		return;
-	}
-	Stage = EOreDealAuctionStage::ChoosePartner;
-	FocusedPartner = Offerers[0];
-	Touch();
 }
 
 void AOreDealAuctionBroker::FocusPartner(APlayerState* Player, APlayerState* Target)
 {
-	if (!HasAuthority() || Stage != EOreDealAuctionStage::ChoosePartner || Player != ActivePlayer) return;
-	TArray<APlayerState*> Offerers;
-	GetOfferers(Offerers);
-	if (!Offerers.Contains(Target) || FocusedPartner == Target) return;
+	if (!HasAuthority() || Stage != EOreDealAuctionStage::PickReveal || Player != ActivePlayer) return;
+	TArray<APlayerState*> Requests;
+	GetOfferers(Requests);
+	if (!Requests.Contains(Target) || FocusedPartner == Target) return;
 	FocusedPartner = Target;
 	Touch();
 }
 
 void AOreDealAuctionBroker::ChoosePartner(APlayerState* Player, APlayerState* Target)
 {
-	if (!HasAuthority() || Stage != EOreDealAuctionStage::ChoosePartner || Player != ActivePlayer) return;
-	TArray<APlayerState*> Offerers;
-	GetOfferers(Offerers);
-	if (!Offerers.Contains(Target)) return;
-	ExecuteTrade(Target);
+	if (!HasAuthority() || Stage != EOreDealAuctionStage::PickReveal || Player != ActivePlayer) return;
+	TArray<APlayerState*> Requests;
+	GetOfferers(Requests);
+	if (!Requests.Contains(Target)) return;
+	FocusedPartner = Target;
+	Stage = EOreDealAuctionStage::RequestReview;
+	Touch();
 }
 
-void AOreDealAuctionBroker::ExecuteTrade(APlayerState* Target)
+void AOreDealAuctionBroker::ResolveRequest(APlayerState* Player, bool bAccept)
 {
-	FOreDealAuctionSeat* TargetSeat = FindSeatMutable(Target);
-	if (!TargetSeat) return;
+	if (!HasAuthority() || !IsValid(Player) || !IsValid(FocusedPartner)) return;
+	if (Stage == EOreDealAuctionStage::RequestReview && Player == ActivePlayer)
+	{
+		if (bAccept) Stage = EOreDealAuctionStage::ConfirmTrade;
+		else
+		{
+			if (FOreDealAuctionSeat* Requester = FindSeatMutable(FocusedPartner))
+			{
+				Requester->RequestedRevealIndices.Reset();
+				Requester->OfferHandIndices.Reset();
+				Requester->OfferCards.Reset();
+				Requester->bConfirmed = false;
+			}
+			FocusedPartner = nullptr;
+			Stage = EOreDealAuctionStage::PickReveal;
+		}
+		Touch();
+		return;
+	}
+	if (Stage != EOreDealAuctionStage::ConfirmTrade || Player != FocusedPartner) return;
+	FOreDealAuctionSeat* Requester = FindSeatMutable(FocusedPartner);
+	if (!Requester) return;
+	if (!bAccept)
+	{
+		// The request remains active and editable, exactly as it was before selection.
+		FocusedPartner = nullptr;
+		Stage = EOreDealAuctionStage::PickReveal;
+		Touch();
+		return;
+	}
 
-	// The offer was validated when confirmed; re-check in case the hand changed since.
+	TArray<int32> CentralCards;
 	TArray<int32> Hand;
-	bool bValid = ReadHand(Target, Hand) && TargetSeat->OfferHandIndices.Num() == TargetSeat->OfferCards.Num();
-	for (int32 I = 0; bValid && I < TargetSeat->OfferHandIndices.Num(); ++I)
-		bValid = Hand.IsValidIndex(TargetSeat->OfferHandIndices[I]) && Hand[TargetSeat->OfferHandIndices[I]] == TargetSeat->OfferCards[I];
+	GetDeckCards(GetWorld(), CentralCards);
+	if (!ReadHand(FocusedPartner, Hand) || !IsValidUniqueIndexList(Requester->RequestedRevealIndices, CentralCards.Num()) || !IsValidUniqueIndexList(Requester->OfferHandIndices, Hand.Num()))
+	{
+		FocusedPartner = nullptr;
+		Stage = EOreDealAuctionStage::PickReveal;
+		Touch();
+		return;
+	}
 	TArray<int32> Received;
-	if (!bValid || !RemoveHandIndices(Target, TargetSeat->OfferHandIndices, &Received))
+	if (!RemoveHandIndices(FocusedPartner, Requester->OfferHandIndices, &Received)) return;
+	TArray<int32> Taken;
+	TArray<int32> SortedRequests = Requester->RequestedRevealIndices;
+	SortedRequests.Sort();
+	for (int32 Index : SortedRequests) Taken.Add(CentralCards[Index]);
+	for (int32 Index = SortedRequests.Num() - 1; Index >= 0; --Index) CentralCards.RemoveAt(SortedRequests[Index]);
+	WriteDeckCards(CentralCards);
+	for (FOreDealAuctionSeat& Other : Seats)
 	{
-		// Withdraw the stale offer and decide again with whoever is left.
-		TargetSeat->OfferHandIndices.Reset();
-		TargetSeat->OfferCards.Reset();
-		ResolveBids();
-		return;
+		if (&Other == Requester || Other.Player == ActivePlayer || !Other.bConfirmed) continue;
+		TArray<int32> Rebased;
+		for (int32 RequestedIndex : Other.RequestedRevealIndices)
+		{
+			if (SortedRequests.Contains(RequestedIndex)) continue;
+			int32 Shift = 0;
+			for (int32 RemovedIndex : SortedRequests) if (RemovedIndex < RequestedIndex) ++Shift;
+			Rebased.Add(RequestedIndex - Shift);
+		}
+		Other.RequestedRevealIndices = MoveTemp(Rebased);
+		if (Other.RequestedRevealIndices.IsEmpty())
+		{
+			Other.OfferHandIndices.Reset();
+			Other.OfferCards.Reset();
+			Other.bConfirmed = false;
+		}
 	}
-
-	TArray<int32> Lot;
-	CollectLot(Lot);
-	// Look the seats up again: neither call above resizes Seats, but keep this robust.
-	if (FOreDealAuctionSeat* PartnerSeat = FindSeatMutable(Target)) PartnerSeat->PendingCards.Append(Lot);
-	if (FOreDealAuctionSeat* ActiveSeat = FindSeatMutable(ActivePlayer)) ActiveSeat->PendingCards.Append(Received);
-	AfterLotResolved();
+	Requester->PendingCards.Append(Taken);
+	for (int32 I = 0; I < Taken.Num(); ++I) Requester->PendingReturnable.Add(0);
+	Requester->RequestedRevealIndices.Reset();
+	Requester->OfferHandIndices.Reset();
+	Requester->OfferCards.Reset();
+	Requester->bConfirmed = false;
+	if (FOreDealAuctionSeat* ActiveSeat = FindSeatMutable(ActivePlayer))
+	{
+		ActiveSeat->PendingCards.Append(Received);
+		for (int32 I = 0; I < Received.Num(); ++I) ActiveSeat->PendingReturnable.Add(0);
+	}
+	FocusedPartner = nullptr;
+	Stage = EOreDealAuctionStage::PickReveal;
+	if (CentralCards.IsEmpty() && !HasReturnablePending()) EnterConsume();
+	else Touch();
 }
 
-void AOreDealAuctionBroker::CollectLot(TArray<int32>& OutCards)
+void AOreDealAuctionBroker::PlantHandCard(APlayerState* Player, int32 WagonIndex)
 {
-	OutCards.Reset();
-	TArray<int32> DeckCards;
-	GetDeckCards(GetWorld(), DeckCards);
-	TArray<int32> Sorted = LotIndices;
-	Sorted.Sort();
-	for (int32 Index : Sorted)
-		if (DeckCards.IsValidIndex(Index)) OutCards.Add(DeckCards[Index]);
-	for (int32 I = Sorted.Num() - 1; I >= 0; --I)
-		if (DeckCards.IsValidIndex(Sorted[I])) DeckCards.RemoveAt(Sorted[I]);
-	LotIndices.Reset();
-	WriteDeckCards(DeckCards);
+	// Any participant may plant a hand card while the trade stage is open.
+	if (!HasAuthority() || !IsValid(Player) ||
+		(Stage != EOreDealAuctionStage::PickReveal && Stage != EOreDealAuctionStage::RequestReview && Stage != EOreDealAuctionStage::ConfirmTrade)) return;
+	APawn* Pawn = Player->GetPawn();
+	AActor* Board = FindBoardFor(GetWorld(), Pawn);
+	TArray<int32> Hand;
+	if (!Board || !ReadHand(Player, Hand) || Hand.IsEmpty()) return;
+	int32 PlacedIndex = INDEX_NONE;
+	if (!UOreDealTurnBridge::ExecutePlantCard(Board, Player, Hand[0], WagonIndex, PlacedIndex)) return;
+	Hand.RemoveAt(0);
+	WriteIntArray(Pawn, TEXT("HandCards"), Hand);
+	CallIfExists(Pawn, TEXT("OnRep_HandCards"));
+	Pawn->ForceNetUpdate();
+	if (FIntProperty* HandCount = FindFProperty<FIntProperty>(Pawn->GetClass(), TEXT("HandCount")))
+	{
+		HandCount->SetPropertyValue_InContainer(Pawn, Hand.Num());
+		CallIfExists(Pawn, TEXT("OnRep_HandCount"));
+	}
+	if (FOreDealAuctionSeat* Seat = FindSeatMutable(Player); Seat && Seat->bConfirmed)
+	{
+		TArray<int32> Adjusted;
+		for (int32 I = 0; I < Seat->OfferHandIndices.Num(); ++I)
+		{
+			if (Seat->OfferHandIndices[I] == 0) continue;
+			Adjusted.Add(Seat->OfferHandIndices[I] - 1);
+		}
+		Seat->OfferHandIndices = MoveTemp(Adjusted);
+		Seat->OfferCards.Reset();
+		for (int32 Index : Seat->OfferHandIndices) if (Hand.IsValidIndex(Index)) Seat->OfferCards.Add(Hand[Index]);
+		if (Seat->OfferCards.Num() != Seat->OfferHandIndices.Num())
+		{
+			Seat->OfferCards.Reset();
+			Seat->OfferHandIndices.Reset();
+			Seat->RequestedRevealIndices.Reset();
+			Seat->bConfirmed = false;
+		}
+	}
+	Touch();
 }
 
-void AOreDealAuctionBroker::AfterLotResolved()
+bool AOreDealAuctionBroker::HasReturnablePending() const
 {
-	ClearOffers();
-	LotIndices.Reset();
-	TArray<int32> DeckCards;
-	GetDeckCards(GetWorld(), DeckCards);
-	if (DeckCards.IsEmpty())
-	{
-		EnterConsume();
-		return;
-	}
-	Stage = EOreDealAuctionStage::SelectLot;
+	for (const FOreDealAuctionSeat& Seat : Seats)
+		for (uint8 bReturnable : Seat.PendingReturnable)
+			if (bReturnable != 0) return true;
+	return false;
+}
+
+void AOreDealAuctionBroker::ReturnPending(APlayerState* Player)
+{
+	if (!HasAuthority() || Stage != EOreDealAuctionStage::PickReveal || Player != ActivePlayer) return;
+	FOreDealAuctionSeat* Seat = FindSeatMutable(Player);
+	if (!Seat) return;
+	const int32 ReturnIndex = Seat->PendingReturnable.IndexOfByKey(static_cast<uint8>(1));
+	if (ReturnIndex == INDEX_NONE || !Seat->PendingCards.IsValidIndex(ReturnIndex)) return;
+	TArray<int32> CentralCards;
+	GetDeckCards(GetWorld(), CentralCards);
+	CentralCards.Add(Seat->PendingCards[ReturnIndex]);
+	Seat->PendingCards.RemoveAt(ReturnIndex);
+	Seat->PendingReturnable.RemoveAt(ReturnIndex);
+	WriteDeckCards(CentralCards);
 	Touch();
 }
 
@@ -561,8 +637,9 @@ void AOreDealAuctionBroker::EnterConsume()
 
 void AOreDealAuctionBroker::PlacePending(APlayerState* Player, int32 WagonIndex)
 {
-	// 가져온 카드 are placed only after every 덱 위 카드 is gone (3/4), never during the trade itself.
-	if (!HasAuthority() || Stage != EOreDealAuctionStage::Consume || !IsValid(Player)) return;
+	// Players may plant acquired cards while requests are still live. Consume also waits for
+	// every pending card before the turn advances.
+	if (!HasAuthority() || Stage == EOreDealAuctionStage::Idle || !IsValid(Player)) return;
 	FOreDealAuctionSeat* Seat = FindSeatMutable(Player);
 	if (!Seat || Seat->PendingCards.IsEmpty()) return;
 	AActor* Board = FindBoardFor(GetWorld(), Player->GetPawn());
@@ -575,6 +652,7 @@ void AOreDealAuctionBroker::PlacePending(APlayerState* Player, int32 WagonIndex)
 		return;
 	}
 	Seat->PendingCards.RemoveAt(0);
+	if (!Seat->PendingReturnable.IsEmpty()) Seat->PendingReturnable.RemoveAt(0);
 	if (AOreDealTablePlayerController* PC = Cast<AOreDealTablePlayerController>(Player->GetPlayerController()))
 	{
 		if (PlacedWagonIndex != INDEX_NONE)
@@ -847,13 +925,6 @@ void AOreDealAuctionBroker::TriggerGameEnd()
 		if (AOreDealTablePlayerController* TablePC = Cast<AOreDealTablePlayerController>(It->Get()))
 		{
 			TablePC->ClientStartGameOverCeremony(Winner);
-		}
-		else if (APlayerController* BasePC = It->Get())
-		{
-			if (UFunction* ShowResultFn = BasePC->FindFunction(TEXT("ClientShowResult")))
-			{
-				BasePC->ProcessEvent(ShowResultFn, nullptr);
-			}
 		}
 	}
 }

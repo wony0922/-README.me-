@@ -29,7 +29,9 @@ public:
 	/** Returns true when the store consumed the key (the controller must then stop processing it). */
 	bool HandleInputKey(const FKey& Key, EInputEvent Event);
 	bool IsStoreOpen() const { return bStoreOpen; }
+	UOreDealStoreWidget* GetStoreWidget() const { return Widget.Get(); }
 	void ToggleStore();
+	void OpenInventoryTab();
 	/** Closing always cancels whatever was in progress (e.g. a purchase waiting for confirmation). */
 	void SetStoreOpen(bool bOpen);
 

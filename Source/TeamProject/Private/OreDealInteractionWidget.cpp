@@ -323,9 +323,9 @@ void UOreDealInteractionWidget::BuildInterface()
 	MerchantButton->Rename(TEXT("StoreButton"));
 	MerchantButton->OnClicked.AddDynamic(this, &UOreDealInteractionWidget::OnMerchantClicked);
 	// Keep the merchant control away from the lobby's centered start prompt and the
-	// gameplay phase HUD. This button is the reliable screen-space entry point even
-	// when the 3D merchant mesh has no interaction tag.
+	// gameplay phase HUD. This button remains the reliable screen-space entry point.
 	MerchantButton->SetVisibility(ESlateVisibility::Visible);
+	MerchantButton->SetBackgroundColor(FLinearColor(1.0f, 0.78f, 0.12f, 1.0f));
 	// Sits just under the collapsed chat panel (18 + 132 + gap).
 	SetCanvasRect(RootCanvas, MerchantButton, FVector2D(20.0f, 160.0f), FVector2D(220.0f, 56.0f));
 
@@ -346,7 +346,7 @@ void UOreDealInteractionWidget::BuildInterface()
 	HandCardScroll->SetAlwaysShowScrollbar(true);
 	HandCardScroll->SetScrollBarVisibility(ESlateVisibility::Visible);
 	HandCardSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("HandCardSizeBox"));
-	HandCardSizeBox->SetHeightOverride(170.0f);
+	HandCardSizeBox->SetHeightOverride(294.0f);
 	HandCardCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("HandCardCanvas"));
 	HandCardSizeBox->AddChild(HandCardCanvas);
 	HandCardScroll->AddChild(HandCardSizeBox);
@@ -354,7 +354,7 @@ void UOreDealInteractionWidget::BuildInterface()
 	HandBody->AddChildToVerticalBox(MakeLabel(WidgetTree, TEXT("마우스를 올리거나 ← / → 키로 카드를 확인하세요 · Esc로 닫기"), 14));
 	HandRackPanel->SetContent(HandBody);
 	HandRackPanel->SetVisibility(ESlateVisibility::Collapsed);
-	SetCanvasRect(RootCanvas, HandRackPanel, FVector2D::ZeroVector, FVector2D(1000.0f, 300.0f), FVector2D(0.5f, 0.5f), FVector2D(0.5f, 0.5f));
+	SetCanvasRect(RootCanvas, HandRackPanel, FVector2D::ZeroVector, FVector2D(1000.0f, 420.0f), FVector2D(0.5f, 0.5f), FVector2D(0.5f, 0.5f));
 	HandRackSlot = Cast<UCanvasPanelSlot>(HandRackPanel->Slot);
 
 	MarketPanel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("MarketTradePanel"));
@@ -490,6 +490,12 @@ void UOreDealInteractionWidget::SetChatExpanded(bool bExpanded)
 	}
 	ApplyChatLayout();
 	if (bExpanded && ChatScroll) ChatScroll->ScrollToEnd();
+}
+
+bool UOreDealInteractionWidget::IsScreenPositionInChat(const FVector2D& ScreenPosition) const
+{
+	return ChatPanel && ChatPanel->GetVisibility() == ESlateVisibility::Visible &&
+		ChatPanel->GetCachedGeometry().IsUnderLocation(ScreenPosition);
 }
 
 void UOreDealInteractionWidget::SetSalesOpen(bool bOpen)
@@ -817,23 +823,36 @@ void UOreDealInteractionWidget::RefreshHandCards(const TArray<int32>& Cards)
 	HandCardBorders.Reset();
 	HandCardLabels.Reset();
 	static const TCHAR* Names[] = { TEXT("Rock"), TEXT("Coal"), TEXT("Copper"), TEXT("Iron"), TEXT("Silver"), TEXT("Gold"), TEXT("Diamond"), TEXT("Adamantium") };
-	const float CardWidth = 230.0f;
-	const float Step = CardWidth / 3.0f;
-	const float CanvasWidth = Cards.Num() > 0 ? Step * (Cards.Num() - 1) + CardWidth : CardWidth;
+	static const TCHAR* TexturePaths[] = {
+		TEXT("/Game/MaterialTraders/Cards/rock.rock"), TEXT("/Game/MaterialTraders/Cards/coal.coal"),
+		TEXT("/Game/MaterialTraders/Cards/copper.copper"), TEXT("/Game/MaterialTraders/Cards/iron.iron"),
+		TEXT("/Game/MaterialTraders/Cards/silver.silver"), TEXT("/Game/MaterialTraders/Cards/gold.gold"),
+		TEXT("/Game/MaterialTraders/Cards/diamond.diamond"), TEXT("/Game/MaterialTraders/Cards/adamantium.adamantium")
+	};
+	static TWeakObjectPtr<UTexture2D> CardTextures[UE_ARRAY_COUNT(TexturePaths)];
+	const float RackCardWidth = 210.0f;
+	const float RackCardHeight = 294.0f;
+	const float Step = RackCardWidth * 0.42f;
+	const float CanvasWidth = Cards.Num() > 0 ? Step * (Cards.Num() - 1) + RackCardWidth : RackCardWidth;
 	if (HandCardSizeBox) HandCardSizeBox->SetWidthOverride(CanvasWidth);
 	for (int32 I = 0; I < Cards.Num(); ++I)
 	{
-		UBorder* Card = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-		Card->SetBrushColor(FLinearColor(0.10f, 0.095f, 0.085f, 1.0f));
-		UVerticalBox* Face = WidgetTree->ConstructWidget<UVerticalBox>();
 		const int32 Resource = Cards[I];
+		UBorder* Card = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+		if (Resource >= 0 && Resource < UE_ARRAY_COUNT(TexturePaths))
+		{
+			if (!CardTextures[Resource].IsValid()) CardTextures[Resource] = LoadObject<UTexture2D>(nullptr, TexturePaths[Resource]);
+			if (UTexture2D* Texture = CardTextures[Resource].Get()) Card->SetBrushFromTexture(Texture);
+		}
+		Card->SetPadding(FMargin(10.0f));
+		UVerticalBox* Face = WidgetTree->ConstructWidget<UVerticalBox>();
 		const FString Name = Resource >= 0 && Resource < UE_ARRAY_COUNT(Names) ? Names[Resource] : FString::Printf(TEXT("자원 %d"), Resource);
 		Face->AddChildToVerticalBox(MakeLabel(WidgetTree, FString::Printf(TEXT("%02d"), I + 1), 14));
 		UTextBlock* Label = MakeLabel(WidgetTree, Name, 19);
 		Label->SetAutoWrapText(true);
 		Face->AddChildToVerticalBox(Label);
 		Card->SetContent(Face);
-		SetCanvasRect(HandCardCanvas, Card, FVector2D(Step * I, 0.0f), FVector2D(CardWidth, 170.0f));
+		SetCanvasRect(HandCardCanvas, Card, FVector2D(Step * I, 0.0f), FVector2D(RackCardWidth, RackCardHeight));
 		HandCardBorders.Add(Card);
 		HandCardLabels.Add(Label);
 	}
@@ -881,7 +900,9 @@ void UOreDealInteractionWidget::AddChatMessage(const FString& Sender, const FStr
 	if (!ChatScroll || !WidgetTree) return;
 	const bool bWasAtEnd = !bChatExpanded || ChatScroll->GetScrollOffset() + 8.0f >= ChatScroll->GetScrollOffsetOfEnd();
 	const float PreviousScrollOffset = ChatScroll->GetScrollOffset();
-	const FString Line = FString::Printf(TEXT("%s: %s"), *Sender, *Message);
+	const FString Line = Sender == TEXT("보호")
+		? Message
+		: FString::Printf(TEXT("%s: %s"), *Sender, *Message);
 	ChatHistory.Add(Line);
 	if (ChatHistory.Num() > 100) ChatHistory.RemoveAt(0, ChatHistory.Num() - 100);
 	ChatScroll->ClearChildren();

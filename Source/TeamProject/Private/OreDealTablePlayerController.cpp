@@ -3,6 +3,7 @@
 #include "Components/TextRenderComponent.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
+#include "NiagaraComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
 #include "EnhancedInputSubsystems.h"
@@ -11,19 +12,30 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/PlayerState.h"
+#include "Framework/Application/SlateApplication.h"
 #include "CollisionQueryParams.h"
 #include "Components/ActorComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/StaticMesh.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
 #include "InputMappingContext.h"
 #include "InputKeyEventArgs.h"
 #include "InputCoreTypes.h"
 #include "Components/EditableTextBox.h"
+#include "Components/Button.h"
+#include "Components/ContentWidget.h"
+#include "Components/PanelWidget.h"
+#include "Components/TextBlock.h"
+#include "Components/RichTextBlock.h"
+#include "Blueprint/WidgetTree.h"
+#include "TimerManager.h"
 #include "OreDealInteractionWidget.h"
+#include "OreDealCeremonyWidget.h"
 #include "OreDealHandViewWidget.h"
 #include "OreDealPreGameComponent.h"
 #include "OreDealMarketBroker.h"
@@ -32,6 +44,7 @@
 #include "OreDealStoreCatalog.h"
 #include "OreDealStoreComponent.h"
 #include "OreDealStoreWidget.h"
+#include "OreDealInventoryWidget.h"
 #include "OreDealTurnBridge.h"
 #include "OreDealCardInfo.h"
 #include "OreDealWagonStateComponent.h"
@@ -112,6 +125,12 @@ namespace
 		return AOreDealAuctionBroker::FindDeck(World);
 	}
 
+	int32 GetGlobalTurnPhase(AActor* Deck)
+	{
+		const FIntProperty* Phase = IsValid(Deck) ? FindFProperty<FIntProperty>(Deck->GetClass(), TEXT("TurnPhaseIndex")) : nullptr;
+		return Phase ? Phase->GetPropertyValue_InContainer(Deck) : INDEX_NONE;
+	}
+
 	bool IsPlayersTurn(AActor* Deck, APlayerState* PlayerState, int32& OutPhase)
 	{
 		if (!IsValid(Deck) || !IsValid(PlayerState)) return false;
@@ -139,6 +158,7 @@ void AOreDealTablePlayerController::BeginPlay()
 	Super::BeginPlay();
 	NormalizeStoreCatalog();
 	CleanUpBoardWagonTexts();
+	EnsureSeatMerchantBells();
 	GetPlayerBoard();
 	if (HasAuthority() && GetWorld())
 	{
@@ -177,6 +197,8 @@ void AOreDealTablePlayerController::BeginPlay()
 		if (InteractionWidget) InteractionWidget->AddToViewport(32000);
 		HandViewWidget = CreateWidget<UOreDealHandViewWidget>(this, UOreDealHandViewWidget::StaticClass());
 		if (HandViewWidget) HandViewWidget->AddToViewport(31000);
+		InventoryWidget = CreateWidget<UOreDealInventoryWidget>(this, UOreDealInventoryWidget::StaticClass());
+		if (InventoryWidget) InventoryWidget->AddToViewport(33000);
 		CachedCardDeck = FindCardDeck(GetWorld());
 	}
 }
@@ -190,11 +212,12 @@ void AOreDealTablePlayerController::NormalizeStoreCatalog()
 		if (Item.Id == TEXT("AIglasses")) Item.Grant = EOreDealStoreGrant::AIGlasses;
 		else if (Item.Id == TEXT("wood")) { Item.Cost = 1; Item.Amount = 1; Item.Grant = EOreDealStoreGrant::PlayerStateInt; Item.GrantProperty = TEXT("Wood"); }
 		else if (Item.Id == TEXT("WagonSlotUpgrade")) { Item.Cost = 5; Item.Amount = 1; Item.Grant = EOreDealStoreGrant::WagonSlotUpgrade; Item.GrantProperty = TEXT("WagonSlotUpgrade"); }
-		else if (Item.Id == TEXT("axe")) { Item.Cost = 3; Item.Amount = 1; Item.Grant = EOreDealStoreGrant::WoodAxe; Item.Description = FText::FromString(TEXT("카드를 뽑을 때 나무를 2개 얻습니다.")); }
-		else if (Item.Id == TEXT("bottle")) { Item.Cost = 1; Item.Amount = 1; Item.Grant = EOreDealStoreGrant::SpawnBottles; Item.Description = FText::FromString(TEXT("구매하면 병 3개가 놓입니다. 마우스로 집고 Space로 던집니다.")); }
+		else if (Item.Id == TEXT("axe")) { Item.Name = TEXT("도끼"); Item.Cost = 3; Item.Amount = 1; Item.Grant = EOreDealStoreGrant::WoodAxe; Item.Description = FText::FromString(TEXT("카드를 뽑을 때 나무를 2개 얻습니다.")); }
+	else if (Item.Id == TEXT("bottle")) { Item.Cost = 1; Item.Amount = 1; Item.Grant = EOreDealStoreGrant::SpawnBottles; Item.Description = FText::FromString(TEXT("마차 왼쪽에 병 3개가 놓입니다. 왼쪽 클릭으로 들고, 오른쪽 클릭으로 마시거나 Space로 던집니다.")); }
 		else if (Item.Id == TEXT("ChaosCard")) Item.Grant = EOreDealStoreGrant::ChaosCard;
 		else if (Item.Id == TEXT("oil"))
 		{
+			Item.Name = TEXT("은근슬쩍");
 			Item.Cost = 2;
 			Item.Grant = EOreDealStoreGrant::PlayerStateInt;
 			Item.Description = FText::FromString(TEXT("코인 2개. 상대의 마차 슬롯을 고장낼 확률 70%, 들킬 확률 30%. 들키면 나무 2개를 빼앗깁니다."));
@@ -230,6 +253,13 @@ void AOreDealTablePlayerController::PlayerTick(float DeltaTime)
 {
 	CleanUpBoardWagonTexts();
 	GetPlayerBoard();
+	StackLabelRefreshElapsed += DeltaTime;
+	if (StackLabelRefreshElapsed >= 0.1f)
+	{
+		StackLabelRefreshElapsed = 0.0f;
+		UpdateWagonStackLabels();
+	}
+	UpdateProtectedCardFeedback(DeltaTime);
 
 	if (bInGameOverCeremony)
 	{
@@ -282,6 +312,24 @@ void AOreDealTablePlayerController::PlayerTick(float DeltaTime)
 	{
 		HandViewWidget = CreateWidget<UOreDealHandViewWidget>(this, UOreDealHandViewWidget::StaticClass());
 		if (HandViewWidget) HandViewWidget->AddToViewport(31000);
+	}
+	if (IsLocalController() && !InventoryWidget)
+	{
+		InventoryWidget = CreateWidget<UOreDealInventoryWidget>(this, UOreDealInventoryWidget::StaticClass());
+		if (InventoryWidget) InventoryWidget->AddToViewport(33000);
+	}
+	if (IsLocalController())
+	{
+		TArray<int32> ObservedHand;
+		GetLocalHandCards(ObservedHand);
+		int32 Phase = INDEX_NONE;
+		const bool bSupplyDrawPhase = IsPlayersTurn(FindCardDeck(GetWorld()), PlayerState, Phase) && Phase == 3;
+		if (LastObservedHandCount != INDEX_NONE && bSupplyDrawPhase && ObservedHand.Num() > LastObservedHandCount && InventoryWidget)
+		{
+			const int32 DrawnCount = ObservedHand.Num() - LastObservedHandCount;
+			InventoryWidget->QueueWoodCardReveal(DrawnCount * (bHasWoodAxe ? 2 : 1));
+		}
+		LastObservedHandCount = ObservedHand.Num();
 	}
 	if (IsLocalController() && !PreGameComponent)
 	{
@@ -513,21 +561,47 @@ bool AOreDealTablePlayerController::ApplySpawnBottles(APlayerState* PurchasingPl
 {
 	if (!HasAuthority() || PurchasingPlayer != PlayerState || !GetWorld()) return false;
 	AActor* Board = GetPlayerBoard();
-	if (!Board) return false;
-	UStaticMesh* BottleMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
-	UMaterialInterface* BottleMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Asset/Saloon/SL_BottleGreen.SL_BottleGreen"));
-	if (!BottleMesh) return false;
+	AActor* SpawnAnchor = Board ? Board : GetPawn();
+	if (!SpawnAnchor)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Ore Deal: bottle purchase failed because this player has no board or pawn: %s"), *GetNameSafe(PlayerState));
+		return false;
+	}
+	FVector SlotLocation = SpawnAnchor->GetActorLocation();
+	if (Board)
+		for (UActorComponent* Component : Board->GetComponents())
+			if (Component && Component->GetFName() == TEXT("WagonPivot0"))
+				if (USceneComponent* Pivot = Cast<USceneComponent>(Component))
+				{
+					SlotLocation = Pivot->GetComponentLocation();
+					break;
+				}
+	if (!Board)
+		if (const APawn* Pawn = Cast<APawn>(SpawnAnchor))
+			if (const UCapsuleComponent* Capsule = Pawn->FindComponentByClass<UCapsuleComponent>())
+				SlotLocation.Z -= Capsule->GetScaledCapsuleHalfHeight() - 25.0f;
+	const FVector RightVector = SpawnAnchor->GetActorRightVector();
+	const FVector LeftOfFirstWagon = -RightVector;
 	int32 Spawned = 0;
 	for (int32 I = 0; I < 3; ++I)
 	{
 		FActorSpawnParameters Params;
 		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		AOreDealThrowableBottle* Bottle = GetWorld()->SpawnActor<AOreDealThrowableBottle>(Board->GetActorLocation() + FVector(-45.0f, I * 18.0f, 55.0f), FRotator::ZeroRotator, Params);
+		const FVector Location = SlotLocation + LeftOfFirstWagon * 88.0f + RightVector * ((I - 1) * 27.0f) + FVector(0.0f, 0.0f, 35.0f);
+		AOreDealThrowableBottle* Bottle = GetWorld()->SpawnActor<AOreDealThrowableBottle>(Location, FRotator::ZeroRotator, Params);
 		if (!Bottle) continue;
-		Bottle->InitializeBottle(BottleMesh, BottleMaterial);
+		Bottle->SetOwner(this);
+		Bottle->InitializeBottle();
 		++Spawned;
 	}
-	return Spawned == 3;
+	if (Spawned != 3)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Ore Deal: bottle purchase spawned %d of 3 bottles for %s"), Spawned, *GetNameSafe(GetPawn()));
+		for (TActorIterator<AOreDealThrowableBottle> It(GetWorld()); It; ++It)
+			if (It->GetOwner() == this && It->ActorHasTag(TEXT("OreDealBottle"))) It->Destroy();
+		return false;
+	}
+	return true;
 }
 
 bool AOreDealTablePlayerController::ApplyChaosCard(APlayerState* PurchasingPlayer)
@@ -563,6 +637,28 @@ void AOreDealTablePlayerController::ServerThrowBottle_Implementation()
 		if (APawn* ControlledPawn = GetPawn()) Throwable->GetBottleMesh()->AddImpulse(ControlledPawn->GetActorForwardVector() * 1700.0f + FVector(0.0f, 0.0f, 350.0f), NAME_None, true);
 	}
 	ClientSetHoldingBottle(false);
+	if (UWorld* World = GetWorld())
+	{
+		const FString Message = FString::Printf(TEXT("@@ %s ** 술병 사용!"), PlayerState ? *PlayerState->GetPlayerName() : TEXT("플레이어"));
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+			if (AOreDealTablePlayerController* Recipient = Cast<AOreDealTablePlayerController>(It->Get())) Recipient->ClientReceiveChat(TEXT("상점"), Message);
+	}
+}
+
+void AOreDealTablePlayerController::ServerDrinkBottle_Implementation()
+{
+	if (!HasAuthority() || !IsValid(HeldBottle)) return;
+	AOreDealThrowableBottle* Bottle = Cast<AOreDealThrowableBottle>(HeldBottle);
+	if (!Bottle) return;
+	HeldBottle = nullptr;
+	Bottle->BeginDrink();
+	ClientSetHoldingBottle(false);
+	if (UWorld* World = GetWorld())
+	{
+		const FString Message = FString::Printf(TEXT("@@ %s ** 술병 사용!"), PlayerState ? *PlayerState->GetPlayerName() : TEXT("플레이어"));
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+			if (AOreDealTablePlayerController* Recipient = Cast<AOreDealTablePlayerController>(It->Get())) Recipient->ClientReceiveChat(TEXT("상점"), Message);
+	}
 }
 
 void AOreDealTablePlayerController::ClientSetHoldingBottle_Implementation(bool bHolding)
@@ -608,28 +704,65 @@ void AOreDealTablePlayerController::UpdateRotation(float DeltaTime)
 
 bool AOreDealTablePlayerController::InputKey(const FInputKeyEventArgs& Params)
 {
-	// 게임 종료 세레머니 중 입력 처리
-	if (IsLocalController() && bInGameOverCeremony && Params.Event == IE_Pressed)
+	// The end screen is a modal UI. Route every press and release to Slate before the chat,
+	// camera, auction, or world-click handlers can consume it.
+	if (IsLocalController() && bInGameOverCeremony)
 	{
-		// 1. 결과창이 뜬 상태에서 Enter를 누를 수 있는 타이머가 지났을 때 Enter 누르면 메인 메뉴로
-		if (bResultWidgetOpen && bCanPressEnterForMainMenu && (Params.Key == EKeys::Enter))
+		if (bResultWidgetOpen)
 		{
-			ReturnToMainMenu();
-			return true;
+			if (Params.Event == IE_Pressed)
+			{
+				if (Params.Key == EKeys::Enter || Params.Key == EKeys::M || Params.Key == EKeys::Escape)
+				{
+					ReturnToMainMenu();
+					return true;
+				}
+			}
+			return Super::InputKey(Params);
 		}
-
-		// 2. 랜덤 카메라 단계에서 Space 키를 누르면 결과창 띄우기
-		if (bRandomCameraPhase && !bResultWidgetOpen && Params.Key == EKeys::SpaceBar)
+		if (Params.Event == IE_Pressed && bRandomCameraPhase && Params.Key == EKeys::SpaceBar)
 		{
 			ShowResultScreen();
 			return true;
 		}
+		return true;
+	}
+	if (IsLocalController() && AuctionComponent && AuctionComponent->IsTradeModalOpen() && Params.Key.IsMouseButton())
+		return Super::InputKey(Params);
 
-		return true; // 세레머니 중에는 다른 일반 인게임 입력 차단
+	// Clicking the expanded chat restores text focus. Clicking elsewhere dismisses it and
+	// continues through the usual game/UI path so the click still activates its target.
+	if (IsLocalController() && InteractionWidget && Params.Event == IE_Pressed && Params.Key.IsMouseButton())
+	{
+		float MouseX = 0.0f, MouseY = 0.0f;
+		const bool bClickInChat = GetMousePosition(MouseX, MouseY) &&
+			InteractionWidget->IsScreenPositionInChat(FVector2D(MouseX, MouseY));
+		if (bClickInChat && !InteractionWidget->IsChatExpanded())
+		{
+			InteractionWidget->SetChatExpanded(true);
+			ApplyInteractionInputMode(true, true);
+			return Super::InputKey(Params);
+		}
+		if (bClickInChat && InteractionWidget->IsChatExpanded())
+		{
+			ApplyInteractionInputMode(true, true);
+			return Super::InputKey(Params);
+		}
+		if (InteractionWidget->IsChatExpanded())
+		{
+			InteractionWidget->SetChatExpanded(false);
+			const bool bOtherUIOpen = (StoreComponent && StoreComponent->IsStoreOpen()) ||
+				InteractionWidget->IsSalesOpen() || InteractionWidget->IsHandRackOpen() || InteractionWidget->IsMarketOpen();
+			ApplyInteractionInputMode(bOtherUIOpen, false);
+		}
 	}
 	// Store (F): opens/closes with F and, while open, takes every keyboard key before anything else.
 	if (IsLocalController() && StoreComponent && (!InteractionWidget || !InteractionWidget->IsChatExpanded()) &&
 		StoreComponent->HandleInputKey(Params.Key, Params.Event))
+		return true;
+	// A modal store owns mouse input. Let Slate process clicks on its tabs and entries
+	// instead of treating them as clicks on the merchant, deck, or other world actors.
+	if (IsLocalController() && StoreComponent && StoreComponent->IsStoreOpen() && Params.Key.IsMouseButton())
 		return true;
 	if (IsLocalController() && AuctionComponent &&
 		(!InteractionWidget || (!InteractionWidget->IsChatExpanded() && !InteractionWidget->IsSalesOpen())) &&
@@ -640,12 +773,18 @@ bool AOreDealTablePlayerController::InputKey(const FInputKeyEventArgs& Params)
 		ServerThrowBottle();
 		return true;
 	}
+	if (IsLocalController() && bHoldingBottleLocal && Params.Event == IE_Pressed && Params.Key == EKeys::RightMouseButton)
+	{
+		ServerDrinkBottle();
+		return true;
+	}
 	if (IsLocalController() && (Params.Key == EKeys::A || Params.Key == EKeys::D) &&
 		(!InteractionWidget || (!InteractionWidget->IsChatExpanded() && !InteractionWidget->IsSalesOpen() && !InteractionWidget->IsHandRackOpen())))
 	{
 		// A/D moves the in-game focus across the currently unlocked wagon slots.
 		int32 Phase = INDEX_NONE;
-		if (!IsPlayersTurn(FindCardDeck(GetWorld()), PlayerState, Phase)) return Super::InputKey(Params);
+		AActor* Deck = FindCardDeck(GetWorld());
+		if (!IsPlayersTurn(Deck, PlayerState, Phase) && GetGlobalTurnPhase(Deck) != 0) return Super::InputKey(Params);
 		if (Params.Event == IE_Pressed || Params.Event == IE_Repeat)
 			SetWagonFocus(FMath::Clamp(GetWagonFocus() + (Params.Key == EKeys::D ? 1 : -1), 0, GetWagonSlotCount() - 1));
 		return true;
@@ -654,8 +793,7 @@ bool AOreDealTablePlayerController::InputKey(const FInputKeyEventArgs& Params)
 		(!InteractionWidget || (!InteractionWidget->IsChatExpanded() && !InteractionWidget->IsSalesOpen() && !InteractionWidget->IsHandRackOpen() && !InteractionWidget->IsMarketOpen())) &&
 		(!StoreComponent || !StoreComponent->IsStoreOpen()))
 	{
-		int32 Phase = INDEX_NONE;
-		if (IsPlayersTurn(FindCardDeck(GetWorld()), PlayerState, Phase) && Phase == 0)
+		if (GetGlobalTurnPhase(FindCardDeck(GetWorld())) == 0)
 		{
 			ServerPlantHandCard(GetWagonFocus());
 			return true;
@@ -699,6 +837,10 @@ bool AOreDealTablePlayerController::InputKey(const FInputKeyEventArgs& Params)
 				ToggleSalesMenu();
 				return true;
 			}
+			if (AuctionComponent)
+				if (APawn* TargetPawn = Cast<APawn>(HitActor))
+					if (APlayerState* TargetPlayer = TargetPawn->GetPlayerState())
+						if (AuctionComponent->HandlePlayerClick(TargetPlayer)) return true;
 			if (HitActor && HitActor->ActorHasTag(TEXT("OreDealBottle")))
 			{
 				ServerPickupBottle(HitActor);
@@ -787,6 +929,26 @@ bool AOreDealTablePlayerController::InputKey(const FInputKeyEventArgs& Params)
 	return Super::InputKey(Params);
 }
 
+void AOreDealTablePlayerController::SetAuctionModalInput(bool bOpen)
+{
+	if (!IsLocalController()) return;
+	if (bOpen)
+	{
+		FInputModeGameAndUI Mode;
+		Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		SetInputMode(Mode);
+		bShowMouseCursor = true;
+		bEnableClickEvents = true;
+	}
+	else
+	{
+		FInputModeGameOnly Mode;
+		Mode.SetConsumeCaptureMouseDown(false);
+		SetInputMode(Mode);
+		bShowMouseCursor = false;
+	}
+}
+
 void AOreDealTablePlayerController::HandleChatEnter()
 {
 	if (!IsLocalController() || !InteractionWidget || !InteractionWidget->IsChatExpanded()) return;
@@ -818,6 +980,40 @@ int32 AOreDealTablePlayerController::GetStorePlayerGold() const
 	const APlayerState* StorePlayerState = PlayerState;
 	const FIntProperty* Gold = StorePlayerState ? FindFProperty<FIntProperty>(StorePlayerState->GetClass(), TEXT("Gold")) : nullptr;
 	return Gold ? Gold->GetPropertyValue_InContainer(StorePlayerState) : 0;
+}
+
+int32 AOreDealTablePlayerController::GetStorePlayerWood() const
+{
+	const APlayerState* StorePlayerState = PlayerState;
+	const FIntProperty* Wood = StorePlayerState ? FindFProperty<FIntProperty>(StorePlayerState->GetClass(), TEXT("Wood")) : nullptr;
+	return Wood ? Wood->GetPropertyValue_InContainer(StorePlayerState) : 0;
+}
+
+void AOreDealTablePlayerController::OpenStoreInventory()
+{
+	if (StoreComponent) StoreComponent->OpenInventoryTab();
+}
+
+void AOreDealTablePlayerController::GetStoreInventoryCounts(TArray<int32>& OutCounts) const
+{
+	OutCounts.Reset();
+	OutCounts.SetNumZeroed(StoreItems.Num());
+	for (int32 Index = 0; Index < StoreItems.Num(); ++Index)
+	{
+		const FName Id = StoreItems[Index].Id;
+		if (Id == TEXT("axe")) OutCounts[Index] = bHasWoodAxe ? 1 : 0;
+		else if (Id == TEXT("bottle"))
+		{
+			for (TActorIterator<AOreDealThrowableBottle> It(GetWorld()); It; ++It)
+				if (It->GetOwner() == this) ++OutCounts[Index];
+		}
+		else if (Id == TEXT("WagonSlotUpgrade"))
+		{
+			TArray<FOreDealStoreWagonView> Wagons;
+			GetStoreWagons(Wagons);
+			OutCounts[Index] = Wagons.Num() > 2 ? 1 : 0;
+		}
+	}
 }
 
 bool AOreDealTablePlayerController::HasEnoughStoreGold(int32 Cost) const
@@ -890,7 +1086,7 @@ bool AOreDealTablePlayerController::ValidateStorePurchase_Implementation(FName I
 	}
 	if (!HasEnoughStoreGold(Cost))
 	{
-		OutMessage = TEXT("골드가 부족합니다");
+		OutMessage.Reset();
 		return false;
 	}
 	OutMessage = TEXT("");
@@ -1035,16 +1231,22 @@ void AOreDealTablePlayerController::ApplyInteractionInputMode(bool bUIActive, bo
 	}
 	FInputModeGameAndUI Mode;
 	Mode.SetHideCursorDuringCapture(false);
-	Mode.SetLockMouseToViewportBehavior(EMouseLockMode::LockAlways);
+	const bool bStoreOpen = StoreComponent && StoreComponent->IsStoreOpen();
+	Mode.SetLockMouseToViewportBehavior(bStoreOpen ? EMouseLockMode::DoNotLock : EMouseLockMode::LockAlways);
 	if (bFocusChatInput && InteractionWidget && InteractionWidget->GetChatInputWidget())
 		Mode.SetWidgetToFocus(InteractionWidget->GetChatInputWidget()->TakeWidget());
+	else if (bStoreOpen && StoreComponent && StoreComponent->GetStoreWidget())
+		Mode.SetWidgetToFocus(StoreComponent->GetStoreWidget()->TakeWidget());
 	SetInputMode(Mode);
-	// FInputModeGameAndUI defaults to CaptureDuringMouseDown. Override that default
-	// after applying the mode so the camera keeps receiving relative mouse motion
-	// after the left button is released.
+	// A modal store needs an uncaptured pointer so Slate can route clicks to its tabs
+	// and item hit areas. Other UI keeps the game's existing relative-look capture.
 	if (UWorld* World = GetWorld())
 		if (UGameViewportClient* Viewport = World->GetGameViewport())
-			Viewport->SetMouseCaptureMode(EMouseCaptureMode::CapturePermanently_IncludingInitialMouseDown);
+		{
+			Viewport->SetMouseCaptureMode(bStoreOpen ? EMouseCaptureMode::NoCapture : EMouseCaptureMode::CapturePermanently_IncludingInitialMouseDown);
+			if (bStoreOpen && FSlateApplication::IsInitialized())
+				FSlateApplication::Get().ReleaseAllPointerCapture();
+		}
 	if (bFocusChatInput && InteractionWidget && InteractionWidget->GetChatInputWidget()) InteractionWidget->GetChatInputWidget()->SetKeyboardFocus();
 }
 
@@ -1186,7 +1388,15 @@ void AOreDealTablePlayerController::ServerPlantHandCard_Implementation(int32 Des
 	APlayerState* PS = PlayerState;
 	AActor* Deck = FindCardDeck(GetWorld());
 	int32 Phase = INDEX_NONE;
-	if (!PS || !IsPlayersTurn(Deck, PS, Phase) || Phase != 0) return;
+	if (!PS) return;
+	if (AOreDealAuctionBroker* Broker = AOreDealAuctionBroker::Find(this))
+		if (Broker->GetStage() == EOreDealAuctionStage::PickReveal || Broker->GetStage() == EOreDealAuctionStage::RequestReview || Broker->GetStage() == EOreDealAuctionStage::ConfirmTrade)
+		{
+			Broker->PlantHandCard(PS, DesiredWagonIndex);
+			return;
+		}
+	Phase = GetGlobalTurnPhase(Deck);
+	if (Phase != 0) return;
 
 	APawn* PlayerPawn = GetPawn();
 	if (!IsValid(PlayerPawn)) return;
@@ -1342,6 +1552,45 @@ void AOreDealTablePlayerController::ClientReceiveChat_Implementation(const FStri
 	if (InteractionWidget) InteractionWidget->AddChatMessage(Sender, Message);
 }
 
+void AOreDealTablePlayerController::ClientPlayProtectedCardFeedback_Implementation(int32 WagonIndex)
+{
+	AActor* Board = GetPlayerBoard();
+	if (!Board) return;
+	const FName CardName(*FString::Printf(TEXT("WagonCard%d"), WagonIndex));
+	const FName GlowName(*FString::Printf(TEXT("WagonGlow%d"), WagonIndex));
+	ProtectedCardComponent = nullptr;
+	ProtectedGlowComponent = nullptr;
+	for (UActorComponent* Component : Board->GetComponents())
+	{
+		if (!Component) continue;
+		if (Component->GetFName() == CardName) ProtectedCardComponent = Cast<UPrimitiveComponent>(Component);
+		if (Component->GetFName() == GlowName) ProtectedGlowComponent = Cast<UPrimitiveComponent>(Component);
+	}
+	if (UPrimitiveComponent* Card = ProtectedCardComponent.Get()) ProtectedCardStartLocation = Card->GetComponentLocation();
+	ProtectedGlowOriginalMaterials.Reset();
+	if (UPrimitiveComponent* Glow = ProtectedGlowComponent.Get())
+	{
+		for (int32 Index = 0; Index < Glow->GetNumMaterials(); ++Index)
+		{
+			UMaterialInterface* Original = Glow->GetMaterial(Index);
+			ProtectedGlowOriginalMaterials.Add(Original);
+			if (UMaterialInstanceDynamic* Dynamic = UMaterialInstanceDynamic::Create(Original, this))
+			{
+				const FLinearColor Red(1.0f, 0.025f, 0.01f, 1.0f);
+				Dynamic->SetVectorParameterValue(TEXT("Color"), Red);
+				Dynamic->SetVectorParameterValue(TEXT("Tint"), Red);
+				Dynamic->SetVectorParameterValue(TEXT("GlowColor"), Red);
+				Dynamic->SetVectorParameterValue(TEXT("GlowTint"), Red);
+				Dynamic->SetVectorParameterValue(TEXT("BaseColor"), Red);
+				Dynamic->SetVectorParameterValue(TEXT("EmissiveColor"), Red);
+				Glow->SetMaterial(Index, Dynamic);
+			}
+		}
+	}
+	ProtectedFeedbackWagonIndex = WagonIndex;
+	ProtectedFeedbackElapsed = 0.5f;
+}
+
 void AOreDealTablePlayerController::ClientShowSaleToast_Implementation(const FString& Resource, int32 Count)
 {
 	if (InteractionWidget) InteractionWidget->ShowSaleToast(Resource, Count);
@@ -1380,7 +1629,10 @@ bool AOreDealTablePlayerController::TraceCenterPointer(FHitResult& OutHit) const
 	const auto IsInteractive = [Deck](AActor* Actor)
 	{
 		if (!IsValid(Actor)) return false;
-		if (Actor->ActorHasTag(TEXT("OreDealMerchant"))) return true;
+		if (Actor->ActorHasTag(TEXT("OreDealMerchant")) || Actor->ActorHasTag(TEXT("OreDealBottle"))) return true;
+		if (const AStaticMeshActor* MeshActor = Cast<AStaticMeshActor>(Actor))
+			if (const UStaticMesh* Mesh = MeshActor->GetStaticMeshComponent()->GetStaticMesh())
+				if (Mesh->GetFName() == TEXT("Table_Bell")) return true;
 		return Actor == Deck;
 	};
 	if (World->LineTraceSingleByChannel(OutHit, RayOrigin, RayEnd, ECC_Visibility, QueryParams) && IsInteractive(OutHit.GetActor())) return true;
@@ -1389,6 +1641,13 @@ bool AOreDealTablePlayerController::TraceCenterPointer(FHitResult& OutHit) const
 	// Fall back to actor bounds so the centre pointer still activates actors without Visibility/Camera response.
 	TArray<AActor*> Candidates;
 	UGameplayStatics::GetAllActorsWithTag(World, TEXT("OreDealMerchant"), Candidates);
+	TArray<AActor*> Bottles;
+	UGameplayStatics::GetAllActorsWithTag(World, TEXT("OreDealBottle"), Bottles);
+	Candidates.Append(Bottles);
+	TArray<AActor*> MeshActors;
+	UGameplayStatics::GetAllActorsOfClass(World, AStaticMeshActor::StaticClass(), MeshActors);
+	for (AActor* MeshActor : MeshActors)
+		if (IsInteractive(MeshActor)) Candidates.AddUnique(MeshActor);
 	if (Deck) Candidates.AddUnique(Deck);
 
 	const FVector Direction = RayDirection.GetSafeNormal();
@@ -1501,6 +1760,122 @@ void AOreDealTablePlayerController::CleanUpBoardWagonTexts()
 	}
 }
 
+void AOreDealTablePlayerController::EnsureSeatMerchantBells()
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+	UClass* BoardClass = StaticLoadClass(AActor::StaticClass(), nullptr, TEXT("/Game/MaterialTraders/Blueprints/BP_CardBoard.BP_CardBoard_C"));
+	UStaticMesh* BellMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Asset/TableBell/StaticMeshes/Table_Bell.Table_Bell"));
+	if (!BoardClass || !BellMesh) return;
+	TArray<AActor*> Boards;
+	UGameplayStatics::GetAllActorsOfClass(World, BoardClass, Boards);
+	TArray<AActor*> ExistingBells;
+	UGameplayStatics::GetAllActorsWithTag(World, TEXT("OreDealMerchant"), ExistingBells);
+	for (AActor* Board : Boards)
+	{
+		if (!IsValid(Board)) continue;
+		USceneComponent* SlotPivot = nullptr;
+		for (UActorComponent* Component : Board->GetComponents())
+			if (Component && Component->GetFName() == TEXT("WagonPivot0")) { SlotPivot = Cast<USceneComponent>(Component); break; }
+		if (!SlotPivot) continue;
+		const FVector PivotLocation = SlotPivot->GetComponentLocation();
+		bool bAlreadyServed = false;
+		for (AActor* Bell : ExistingBells)
+			if (IsValid(Bell) && FVector::DistSquared(Bell->GetActorLocation(), PivotLocation) < FMath::Square(70.0f)) { bAlreadyServed = true; break; }
+		if (bAlreadyServed) continue;
+		const FVector Location = PivotLocation - SlotPivot->GetForwardVector() * 28.0f + SlotPivot->GetRightVector() * 36.0f + FVector(0, 0, 2.0f);
+		FActorSpawnParameters Params;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		AStaticMeshActor* Bell = World->SpawnActor<AStaticMeshActor>(Location, SlotPivot->GetComponentRotation(), Params);
+		if (!Bell) continue;
+		Bell->GetStaticMeshComponent()->SetStaticMesh(BellMesh);
+		Bell->GetStaticMeshComponent()->SetMobility(EComponentMobility::Movable);
+		Bell->GetStaticMeshComponent()->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		Bell->GetStaticMeshComponent()->SetCollisionResponseToAllChannels(ECR_Ignore);
+		Bell->GetStaticMeshComponent()->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+		Bell->GetStaticMeshComponent()->SetCollisionResponseToChannel(ECC_Camera, ECR_Block);
+		Bell->Tags.AddUnique(TEXT("OreDealMerchant"));
+		// Each client creates its local interactive copy so the static mesh and merchant tag are
+		// available immediately without relying on runtime component-property replication.
+		Bell->SetReplicates(false);
+		ExistingBells.Add(Bell);
+	}
+}
+
+void AOreDealTablePlayerController::UpdateWagonStackLabels()
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+	UClass* BoardClass = StaticLoadClass(AActor::StaticClass(), nullptr, TEXT("/Game/MaterialTraders/Blueprints/BP_CardBoard.BP_CardBoard_C"));
+	if (!BoardClass) return;
+	TArray<AActor*> Boards;
+	UGameplayStatics::GetAllActorsOfClass(World, BoardClass, Boards);
+	FVector CameraLocation = FVector::ZeroVector;
+	FRotator CameraRotation = FRotator::ZeroRotator;
+	GetPlayerViewPoint(CameraLocation, CameraRotation);
+	for (AActor* Board : Boards)
+	{
+		if (!IsValid(Board)) continue;
+		const FArrayProperty* CountsProperty = FindFProperty<FArrayProperty>(Board->GetClass(), TEXT("wagonCounts"));
+		const FIntProperty* CountsInner = CountsProperty ? CastField<FIntProperty>(CountsProperty->Inner) : nullptr;
+		if (!CountsProperty || !CountsInner) continue;
+		FScriptArrayHelper Counts(CountsProperty, CountsProperty->ContainerPtrToValuePtr<void>(Board));
+		for (int32 Slot = 0; Slot < Counts.Num(); ++Slot)
+		{
+			const FName PivotName(*FString::Printf(TEXT("WagonPivot%d"), Slot));
+			const FName LabelName(*FString::Printf(TEXT("OreDealStackCount%d"), Slot));
+			USceneComponent* Pivot = nullptr;
+			UTextRenderComponent* Label = nullptr;
+			for (UActorComponent* Component : Board->GetComponents())
+			{
+				if (!Component) continue;
+				if (Component->GetFName() == PivotName) Pivot = Cast<USceneComponent>(Component);
+				if (Component->GetFName() == LabelName) Label = Cast<UTextRenderComponent>(Component);
+			}
+			if (!Pivot) continue;
+			if (!Label)
+			{
+				Label = NewObject<UTextRenderComponent>(Board, LabelName);
+				Label->SetupAttachment(Board->GetRootComponent());
+				Label->SetHorizontalAlignment(EHTA_Center);
+				Label->SetVerticalAlignment(EVRTA_TextCenter);
+				Label->SetWorldSize(11.0f);
+				Label->SetTextRenderColor(FColor(58, 37, 24));
+				Label->SetCastShadow(false);
+				Label->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+				Label->RegisterComponent();
+			}
+			const int32 Count = CountsInner->GetPropertyValue(Counts.GetRawPtr(Slot));
+			Label->SetText(Count > 0 ? FText::FromString(FString::Printf(TEXT("x%d"), Count)) : FText::GetEmpty());
+			Label->SetVisibility(Count > 0);
+			Label->SetWorldLocation(Pivot->GetComponentLocation() + Pivot->GetRightVector() * 10.0f + Pivot->GetUpVector() * 8.0f);
+			Label->SetWorldRotation((CameraLocation - Label->GetComponentLocation()).Rotation());
+		}
+	}
+}
+
+void AOreDealTablePlayerController::UpdateProtectedCardFeedback(float DeltaTime)
+{
+	if (ProtectedFeedbackElapsed <= 0.0f) return;
+	ProtectedFeedbackElapsed = FMath::Max(0.0f, ProtectedFeedbackElapsed - DeltaTime);
+	if (UPrimitiveComponent* Card = ProtectedCardComponent.Get())
+	{
+		const float Time = 0.5f - ProtectedFeedbackElapsed;
+		const float Envelope = FMath::Sin(PI * FMath::Clamp(Time / 0.5f, 0.0f, 1.0f));
+		const float Shake = FMath::Sin(Time * 70.0f) * 8.0f * Envelope;
+		Card->SetWorldLocation(ProtectedCardStartLocation + Card->GetRightVector() * Shake);
+	}
+	if (ProtectedFeedbackElapsed <= 0.0f)
+	{
+		if (UPrimitiveComponent* Card = ProtectedCardComponent.Get()) Card->SetWorldLocation(ProtectedCardStartLocation);
+		if (UPrimitiveComponent* Glow = ProtectedGlowComponent.Get())
+			for (int32 Index = 0; Index < ProtectedGlowOriginalMaterials.Num(); ++Index)
+				Glow->SetMaterial(Index, ProtectedGlowOriginalMaterials[Index]);
+		ProtectedFeedbackWagonIndex = INDEX_NONE;
+		ProtectedGlowOriginalMaterials.Reset();
+	}
+}
+
 void AOreDealTablePlayerController::BroadcastWagonEffect(UWorld* World, AActor* Board, int32 WagonIndex, EOreDealSlotEffect EffectType)
 {
 	if (!World) return;
@@ -1518,8 +1893,20 @@ void AOreDealTablePlayerController::ClientPlayWagonEffect_Implementation(AActor*
 	if (!Board) return;
 
 	FVector SlotLocation = Board->GetActorLocation();
+	FRotator SlotRotation = Board->GetActorRotation();
+	const FName CardName(*FString::Printf(TEXT("WagonCard%d"), WagonIndex));
+	UPrimitiveComponent* WagonCard = nullptr;
+	for (UActorComponent* Comp : Board->GetComponents())
+		if (Comp && Comp->GetFName() == CardName) { WagonCard = Cast<UPrimitiveComponent>(Comp); break; }
+	if (WagonCard)
+	{
+		const FBox CardBounds = WagonCard->Bounds.GetBox();
+		SlotLocation = CardBounds.GetCenter();
+		SlotLocation.Z = CardBounds.Max.Z + 1.0f;
+		SlotRotation = WagonCard->GetComponentRotation();
+	}
 	const FName PivotNames[] = { TEXT("WagonPivot0"), TEXT("WagonPivot1"), TEXT("WagonPivot2") };
-	if (WagonIndex >= 0 && WagonIndex < UE_ARRAY_COUNT(PivotNames))
+	else if (WagonIndex >= 0 && WagonIndex < UE_ARRAY_COUNT(PivotNames))
 	{
 		for (UActorComponent* Comp : Board->GetComponents())
 		{
@@ -1533,7 +1920,7 @@ void AOreDealTablePlayerController::ClientPlayWagonEffect_Implementation(AActor*
 			}
 		}
 	}
-	SlotLocation.Z += 15.0f;
+	if (SlotLocation.Equals(Board->GetActorLocation())) SlotLocation.Z += 1.0f;
 
 	const TCHAR* SystemPath = (EffectType == EOreDealSlotEffect::CoinBurst)
 		? TEXT("/Game/MaterialTraders/Effects/NS_CoinBurst.NS_CoinBurst")
@@ -1550,7 +1937,7 @@ void AOreDealTablePlayerController::ClientPlayWagonEffect_Implementation(AActor*
 
 	if (EffectSystem && GetWorld())
 	{
-		UNiagaraFunctionLibrary::SpawnSystemAtLocation(GetWorld(), EffectSystem, SlotLocation, FRotator::ZeroRotator, FVector(1.0f));
+		UNiagaraFunctionLibrary::SpawnSystemAtLocation(GetWorld(), EffectSystem, SlotLocation, SlotRotation, FVector(1.0f));
 	}
 
 	// Trigger Blueprint event on Board if defined (BP_PlaySlotEffect)
@@ -1573,183 +1960,191 @@ void AOreDealTablePlayerController::ClientPlayWagonEffect_Implementation(AActor*
 void AOreDealTablePlayerController::ClientStartGameOverCeremony_Implementation(APlayerState* InWinner)
 {
 	bInGameOverCeremony = true;
-	bWinnerCameraPhase = true;
+	bWinnerCameraPhase = false;
 	bRandomCameraPhase = false;
 	bResultWidgetOpen = false;
 	bCanPressEnterForMainMenu = false;
+	bResultPromptActive = false;
+	CeremonyStage = 0;
 	CeremonyTimeElapsed = 0.0f;
 	CurrentCameraTimer = 0.0f;
 	WinnerState = InWinner;
+	CeremonyPlayers.Reset();
+	SpotlightIndex = 0;
 
 	UWorld* World = GetWorld();
 	if (!World) return;
 
-	// 기존 인게임 UI 숨기기
+	// Keep only the HUD/status layer. The ceremony title is shown in its own hit-test-invisible overlay.
 	if (InteractionWidget) InteractionWidget->SetVisibility(ESlateVisibility::Hidden);
 	if (HandViewWidget) HandViewWidget->SetVisibility(ESlateVisibility::Hidden);
+	if (InventoryWidget) InventoryWidget->SetVisibility(ESlateVisibility::Hidden);
+	bShowMouseCursor = false;
+	FInputModeGameOnly GameInputMode;
+	SetInputMode(GameInputMode);
 
-	// 1. 카메라 액터들 및 스포트라이트 찾기
+	if (!CeremonyWidget)
+		CeremonyWidget = CreateWidget<UOreDealCeremonyWidget>(this, UOreDealCeremonyWidget::StaticClass());
+	if (CeremonyWidget)
+	{
+		if (!CeremonyWidget->IsInViewport()) CeremonyWidget->AddToViewport(34000);
+		CeremonyWidget->SetPrompt(FText::FromString(TEXT("게임 종료!")), false);
+	}
+
+	// Locate the fixed Winner_Camera and the level's spot light.
 	AActor* WinnerCamera = nullptr;
-	ASpotLight* SpotLightActor = nullptr;
 
 	for (TActorIterator<AActor> It(World); It; ++It)
 	{
 		AActor* Actor = *It;
-		const FString Label = Actor->GetActorLabel();
-		if (Label.Equals(TEXT("Winner_Camera"), ESearchCase::IgnoreCase))
+		const FString ObjectName = Actor->GetName();
+		if (ObjectName.Contains(TEXT("Winner_Camera"), ESearchCase::IgnoreCase))
 		{
 			WinnerCamera = Actor;
 		}
-		else if (Label.Equals(TEXT("CineCameraActor2"), ESearchCase::IgnoreCase))
+		if (ASpotLight* Light = Cast<ASpotLight>(Actor))
 		{
-			CameraInitialLocations.Add(2, Actor->GetActorLocation());
-		}
-		else if (Label.Equals(TEXT("CineCameraActor3"), ESearchCase::IgnoreCase))
-		{
-			CameraInitialLocations.Add(3, Actor->GetActorLocation());
-		}
-		else if (Label.Equals(TEXT("CineCameraActor4"), ESearchCase::IgnoreCase))
-		{
-			CameraInitialLocations.Add(4, Actor->GetActorLocation());
-		}
-
-		if (ASpotLight* SL = Cast<ASpotLight>(Actor))
-		{
-			SpotLightActor = SL;
+			CeremonySpotlight = Light;
 		}
 	}
 
-	// 2. 바 왼쪽 스포트라이트 위치 기준 플레이어 정렬
-	// 스포트라이트: X=-527, Y=96, Z=360
-	const FVector WinnerLoc(-527.0f, 96.0f, 95.0f); // 바닥 높이
-	const FRotator WinnerRot(0.0f, 0.0f, 0.0f); // Winner_Camera(Yaw=-180)를 마주보도록 Yaw=0 설정
-
-	// 우측 패자들 정렬 기준 (오른쪽으로 나열: Y가 감소하는 방향 또는 증가하는 방향)
-	const FVector LosersStartLoc(-527.0f, 180.0f, 95.0f);
-	float LoserOffsetY = 0.0f;
-
+	// Center the full player line behind the bar in the Winner_Camera composition.
 	TArray<APlayerState*> AllPlayers;
 	if (AGameStateBase* GS = World->GetGameState())
 	{
 		AllPlayers = GS->PlayerArray;
 	}
-
+	int32 ValidPawnCount = 0;
 	for (APlayerState* PS : AllPlayers)
 	{
-		if (!PS) continue;
-		APawn* TargetPawn = PS->GetPawn();
-		if (!TargetPawn) continue;
-
-		if (PS == WinnerState.Get())
+		if (PS && PS->GetPawn()) ++ValidPawnCount;
+	}
+	const float CenterY = 96.0f;
+	const float FirstY = CenterY - FMath::Max(ValidPawnCount - 1, 0) * 40.0f;
+	int32 PlayerIndex = 0;
+	for (APlayerState* PS : AllPlayers)
+	{
+		APawn* PlayerPawn = PS ? PS->GetPawn() : nullptr;
+		if (!PlayerPawn) continue;
+		const FVector LineLocation(-527.0f, FirstY + PlayerIndex * 80.0f, 95.0f);
+		PlayerPawn->SetActorLocationAndRotation(LineLocation, FRotator(0.0f, 0.0f, 0.0f));
+		if (FStructProperty* LookRotProp = FindFProperty<FStructProperty>(PlayerPawn->GetClass(), TEXT("lookRot")))
 		{
-			// 우승자 위치 설정
-			TargetPawn->SetActorLocationAndRotation(WinnerLoc, WinnerRot);
+			const FRotator NeutralLook(0.0f, 0.0f, 0.0f);
+			LookRotProp->SetValue_InContainer(PlayerPawn, &NeutralLook);
 		}
-		else
-		{
-			// 패자들: 오른쪽에 나열
-			const FVector LoserLoc = LosersStartLoc + FVector(0.0f, LoserOffsetY, 0.0f);
-			TargetPawn->SetActorLocationAndRotation(LoserLoc, WinnerRot);
-			LoserOffsetY += 80.0f;
-
-			// 패자 슬픈 표정 (lookRot 피치 조절 및 텍스처/이모트 연출)
-			if (FStructProperty* LookRotProp = FindFProperty<FStructProperty>(TargetPawn->GetClass(), TEXT("lookRot")))
-			{
-				FRotator SadRot(25.0f, 0.0f, 0.0f); // 고개 떨굼
-				LookRotProp->SetValue_InContainer(TargetPawn, &SadRot);
-			}
-			if (FBoolProperty* ThumbProp = FindFProperty<FBoolProperty>(TargetPawn->GetClass(), TEXT("bThumbShown")))
-			{
-				ThumbProp->SetPropertyValue_InContainer(TargetPawn, false);
-			}
-		}
+		CeremonyPlayers.Add(PlayerPawn);
+		++PlayerIndex;
 	}
 
-	// 3. 스포트라이트 켜기
-	if (SpotLightActor && SpotLightActor->GetLightComponent())
+	if (ASpotLight* Light = CeremonySpotlight.Get(); Light && Light->GetLightComponent())
 	{
-		SpotLightActor->GetLightComponent()->SetVisibility(true);
-		SpotLightActor->GetLightComponent()->SetIntensity(50000.0f);
+		Light->GetLightComponent()->SetVisibility(false);
+		Light->GetLightComponent()->SetIntensity(32000.0f);
 	}
 
-	// 4. Winner_Camera로 시점 전환
-	if (WinnerCamera)
-	{
-		SetViewTargetWithBlend(WinnerCamera, 0.5f);
-	}
-
-	// 5. 우승자에게 축하 색종이(Confetti) 나이아가라 이펙트 생성
-	const FVector ConfettiLoc = WinnerLoc + FVector(0.0f, 0.0f, 150.0f);
-	const TCHAR* ConfettiPaths[] = {
-		TEXT("/Game/MaterialTraders/Effects/NS_Confetti.NS_Confetti"),
-		TEXT("/Game/Asset/NS_Confetti.NS_Confetti"),
-		TEXT("/Game/MaterialTraders/Effects/NS_CoinBurst.NS_CoinBurst"),
-		TEXT("/Engine/Plugins/FX/Niagara/DefaultAssets/Templates/Emitters/ConfettiBurst.ConfettiBurst")
-	};
-
-	UNiagaraSystem* ConfettiSystem = nullptr;
-	for (const TCHAR* Path : ConfettiPaths)
-	{
-		ConfettiSystem = LoadObject<UNiagaraSystem>(nullptr, Path);
-		if (ConfettiSystem) break;
-	}
-
-	if (ConfettiSystem)
-	{
-		UNiagaraFunctionLibrary::SpawnSystemAtLocation(World, ConfettiSystem, ConfettiLoc, FRotator::ZeroRotator, FVector(2.0f));
-	}
+	if (WinnerCamera) SetViewTargetWithBlend(WinnerCamera, 0.5f);
+	WinnerCoinSystem = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/MaterialTraders/Effects/NS_CoinBurst.NS_CoinBurst"));
+	if (!WinnerCoinSystem) WinnerCoinSystem = LoadObject<UNiagaraSystem>(nullptr, TEXT("/Game/Asset/NS_CoinBurst.NS_CoinBurst"));
 }
 
 void AOreDealTablePlayerController::UpdateGameOverCeremony(float DeltaTime)
 {
+	if (!bInGameOverCeremony || bResultWidgetOpen) return;
 	CeremonyTimeElapsed += DeltaTime;
-
-	// 1단계: 우승자 카메라 연출 (WinnerPhaseDuration초 후 랜덤 카메라로 전환)
-	if (bWinnerCameraPhase)
+	if (CeremonyStage == 0 && CeremonyTimeElapsed >= 5.0f)
 	{
-		if (CeremonyTimeElapsed >= WinnerPhaseDuration)
+		CeremonyStage = 1;
+		CeremonyTimeElapsed = 0.0f;
+		bWinnerCameraPhase = true;
+		if (CeremonyWidget) CeremonyWidget->SetPrompt(FText::FromString(TEXT("결과는?")), true);
+		if (ASpotLight* Light = CeremonySpotlight.Get()) Light->GetLightComponent()->SetVisibility(true);
+	}
+	else if (CeremonyStage == 1 && CeremonyTimeElapsed >= 10.0f)
+	{
+		CeremonyStage = 2;
+		CeremonyTimeElapsed = 0.0f;
+		bWinnerCameraPhase = false;
+	}
+	UpdateCeremonySpotlight(DeltaTime);
+	if (CeremonyStage == 2)
+	{
+		ASpotLight* Light = CeremonySpotlight.Get();
+		APawn* WinnerPawn = WinnerState.IsValid() ? WinnerState->GetPawn() : nullptr;
+		if (!Light || !WinnerPawn)
 		{
-			bWinnerCameraPhase = false;
+			CeremonyStage = 3;
 			bRandomCameraPhase = true;
-			SwitchToNextRandomCamera();
-
-			// 자막/채팅 안내: Space 키를 누르십시오
-			ClientReceiveChat(TEXT("안내"), TEXT("Space 키를 누르면 최종 결과창을 확인합니다."));
+			bResultPromptActive = true;
+			const FString WinnerName = WinnerState.IsValid() ? WinnerState->GetPlayerName() : TEXT("플레이어");
+			if (CeremonyWidget) CeremonyWidget->SetPrompt(FText::FromString(FString::Printf(TEXT("%s 우승!"), *WinnerName)), true);
+			if (UWorld* World = GetWorld(); World && WinnerCoinSystem)
+			{
+				SpawnWinnerCoinBurst();
+				World->GetTimerManager().SetTimer(WinnerCoinTimerHandle, this, &AOreDealTablePlayerController::SpawnWinnerCoinBurst, 0.75f, true, 0.75f);
+			}
 		}
-		return;
+		else
+		{
+			const FBox Bounds = WinnerPawn->GetComponentsBoundingBox(true);
+			const FVector SpotlightStop(Bounds.GetCenter().X, Bounds.GetCenter().Y, Bounds.Max.Z + 264.0f);
+			if (FVector::DistSquared(Light->GetActorLocation(), SpotlightStop) <= FMath::Square(20.0f))
+			{
+				Light->SetActorLocation(SpotlightStop);
+				Light->SetActorRotation((FVector(Bounds.GetCenter().X, Bounds.GetCenter().Y, Bounds.Max.Z + 4.0f) - SpotlightStop).Rotation());
+				CeremonyStage = 3;
+				bRandomCameraPhase = true;
+				bResultPromptActive = true;
+				const FString WinnerName = WinnerState->GetPlayerName();
+				if (CeremonyWidget) CeremonyWidget->SetPrompt(FText::FromString(FString::Printf(TEXT("%s 우승!"), *WinnerName)), true);
+				if (UWorld* World = GetWorld(); World && WinnerCoinSystem)
+				{
+					SpawnWinnerCoinBurst();
+					World->GetTimerManager().SetTimer(WinnerCoinTimerHandle, this, &AOreDealTablePlayerController::SpawnWinnerCoinBurst, 0.75f, true, 0.75f);
+				}
+			}
+		}
 	}
+}
 
-	// 2단계: 바를 가리키는 카메라 2, 3, 4 순회 및 이동
-	if (bRandomCameraPhase && !bResultWidgetOpen)
+void AOreDealTablePlayerController::UpdateCeremonySpotlight(float DeltaTime)
+{
+	ASpotLight* Light = CeremonySpotlight.Get();
+	if (!Light || CeremonyPlayers.IsEmpty()) return;
+	int32 TargetIndex = 0;
+	if (CeremonyStage >= 2)
 	{
-		CurrentCameraTimer += DeltaTime;
-
-		// 카메라 이동 처리
-		if (CurrentActiveCamera.IsValid())
-		{
-			FVector CamLoc = CurrentActiveCamera->GetActorLocation();
-			const float MoveSpeed = 20.0f; // 느린 속도
-
-			if (CurrentCameraIndex == 2 || CurrentCameraIndex == 3)
-			{
-				// camera 2, 3: 오른쪽(카메라 로컬 Right 또는 Y축)으로 천천히 이동
-				CamLoc += CurrentActiveCamera->GetActorRightVector() * (MoveSpeed * DeltaTime);
-				CurrentActiveCamera->SetActorLocation(CamLoc);
-			}
-			else if (CurrentCameraIndex == 4)
-			{
-				// camera 4: 왼쪽으로 천천히 이동
-				CamLoc -= CurrentActiveCamera->GetActorRightVector() * (MoveSpeed * DeltaTime);
-				CurrentActiveCamera->SetActorLocation(CamLoc);
-			}
-		}
-
-		// 몇 초 후 다른 카메라로 전환
-		if (CurrentCameraTimer >= CameraSwitchInterval)
-		{
-			SwitchToNextRandomCamera();
-		}
+		for (int32 Index = 0; Index < CeremonyPlayers.Num(); ++Index)
+			if (CeremonyPlayers[Index].IsValid() && CeremonyPlayers[Index]->GetPlayerState() == WinnerState.Get()) { TargetIndex = Index; break; }
 	}
+	else
+	{
+		const int32 PlayerCount = CeremonyPlayers.Num();
+		const int32 CycleSize = FMath::Max(2 * PlayerCount - 2, 1);
+		const float Progress = CeremonyTimeElapsed / 1.15f;
+		const int32 Segment = FMath::FloorToInt(Progress);
+		const int32 CycleIndex = Segment % CycleSize;
+		TargetIndex = CycleIndex < PlayerCount ? CycleIndex : CycleSize - CycleIndex;
+	}
+	APawn* TargetPawn = CeremonyPlayers.IsValidIndex(TargetIndex) ? CeremonyPlayers[TargetIndex].Get() : nullptr;
+	if (!TargetPawn) return;
+	const FBox Bounds = TargetPawn->GetComponentsBoundingBox(true);
+	const FVector HeadPoint(Bounds.GetCenter().X, Bounds.GetCenter().Y, Bounds.Max.Z + 4.0f);
+	const FVector DesiredLocation = HeadPoint + FVector(0.0f, 0.0f, 260.0f);
+	const FRotator DesiredRotation = (HeadPoint - DesiredLocation).Rotation();
+	Light->SetActorLocation(FMath::VInterpTo(Light->GetActorLocation(), DesiredLocation, DeltaTime, 8.0f));
+	Light->SetActorRotation(FMath::RInterpTo(Light->GetActorRotation(), DesiredRotation, DeltaTime, 8.0f));
+}
+
+void AOreDealTablePlayerController::SpawnWinnerCoinBurst()
+{
+	UWorld* World = GetWorld();
+	APawn* WinnerPawn = WinnerState.IsValid() ? WinnerState->GetPawn() : nullptr;
+	if (!World || !WinnerPawn || !WinnerCoinSystem) return;
+	const FBox Bounds = WinnerPawn->GetComponentsBoundingBox(true);
+	const FVector CoinSpawnLocation(Bounds.GetCenter().X + FMath::FRandRange(-35.0f, 35.0f), Bounds.GetCenter().Y + FMath::FRandRange(-35.0f, 35.0f), Bounds.Max.Z + 220.0f);
+	if (UNiagaraComponent* CoinBurst = UNiagaraFunctionLibrary::SpawnSystemAtLocation(World, WinnerCoinSystem, CoinSpawnLocation, FRotator::ZeroRotator, FVector(0.55f)))
+		CoinBurst->SetAutoDestroy(true);
 }
 
 void AOreDealTablePlayerController::SwitchToNextRandomCamera()
@@ -1776,7 +2171,7 @@ void AOreDealTablePlayerController::SwitchToNextRandomCamera()
 	const FString TargetLabel = FString::Printf(TEXT("CineCameraActor%d"), CurrentCameraIndex);
 	for (TActorIterator<AActor> It(World); It; ++It)
 	{
-		if (It->GetActorLabel().Equals(TargetLabel, ESearchCase::IgnoreCase))
+		if (It->GetName().StartsWith(TargetLabel, ESearchCase::IgnoreCase))
 		{
 			CurrentActiveCamera = *It;
 			// 현재 초기 위치 저장 (맵에 없을 시)
@@ -1797,25 +2192,106 @@ void AOreDealTablePlayerController::ShowResultScreen()
 
 	UWorld* World = GetWorld();
 	if (!World) return;
+	World->GetTimerManager().ClearTimer(WinnerCoinTimerHandle);
+	if (CeremonyWidget) CeremonyWidget->HidePrompt();
 
-	// WBP_Result 위젯 띄우기
 	UClass* ResultWidgetClass = LoadClass<UUserWidget>(nullptr, TEXT("/Game/MaterialTraders/UI/WBP_Result.WBP_Result_C"));
 	if (ResultWidgetClass)
 	{
 		ResultWidgetInstance = CreateWidget<UUserWidget>(this, ResultWidgetClass);
 		if (ResultWidgetInstance)
 		{
+			ResultWidgetInstance->SetVisibility(ESlateVisibility::Visible);
+			ResultWidgetInstance->SetIsFocusable(true);
 			ResultWidgetInstance->AddToViewport(33000);
+			BindResultButtons();
+			World->GetTimerManager().SetTimerForNextTick(this, &AOreDealTablePlayerController::BindResultButtons);
+			FInputModeGameAndUI ResultInputMode;
+			ResultInputMode.SetWidgetToFocus(ResultWidgetInstance->TakeWidget());
+			ResultInputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+			SetInputMode(ResultInputMode);
+			bShowMouseCursor = true;
+			ResultWidgetInstance->SetKeyboardFocus();
 		}
 	}
 
-	// 2초 후 Enter 키를 눌러 메인화면으로 나갈 수 있도록 플래그 설정
-	FTimerHandle EnterTimerHandle;
-	World->GetTimerManager().SetTimer(EnterTimerHandle, [this]()
+	bCanPressEnterForMainMenu = true;
+}
+
+void AOreDealTablePlayerController::BindResultButtons()
+{
+	UUserWidget* ResultWidget = ResultWidgetInstance;
+	if (!ResultWidget || !ResultWidget->WidgetTree) return;
+	TArray<UWidget*> Widgets;
+	ResultWidget->WidgetTree->GetAllWidgets(Widgets);
+	TArray<UButton*> UnassignedButtons;
+	bool bHasRematch = false;
+	bool bHasMainMenu = false;
+	TFunction<void(UWidget*, FString&)> CollectText = [&CollectText](UWidget* Root, FString& OutText)
 	{
-		bCanPressEnterForMainMenu = true;
-		ClientReceiveChat(TEXT("안내"), TEXT("Enter 키를 누르면 메인 메뉴로 이동합니다."));
-	}, 2.0f, false);
+		if (!Root) return;
+		if (const UTextBlock* TextBlock = Cast<UTextBlock>(Root)) OutText += TextBlock->GetText().ToString();
+		if (const URichTextBlock* RichText = Cast<URichTextBlock>(Root)) OutText += RichText->GetText().ToString();
+		if (const UPanelWidget* Panel = Cast<UPanelWidget>(Root))
+			for (int32 Index = 0; Index < Panel->GetChildrenCount(); ++Index) CollectText(Panel->GetChildAt(Index), OutText);
+		else if (const UContentWidget* Content = Cast<UContentWidget>(Root)) CollectText(Content->GetContent(), OutText);
+	};
+	for (UWidget* Widget : Widgets)
+	{
+		UButton* Button = Cast<UButton>(Widget);
+		if (!Button) continue;
+		FString ButtonText;
+		CollectText(Button, ButtonText);
+		const FString ButtonName = Button->GetName();
+		const bool bRematch = ButtonText.Contains(TEXT("한 판 더")) || ButtonName.Contains(TEXT("Rematch"), ESearchCase::IgnoreCase) || ButtonName.Contains(TEXT("Retry"), ESearchCase::IgnoreCase);
+		const bool bMainMenu = ButtonText.Contains(TEXT("메인 메뉴")) || ButtonName.Contains(TEXT("MainMenu"), ESearchCase::IgnoreCase);
+		if (bRematch)
+		{
+			Button->SetIsEnabled(true);
+			Button->OnClicked.Clear();
+			Button->OnClicked.AddUniqueDynamic(this, &AOreDealTablePlayerController::HandleResultRematchClicked);
+			bHasRematch = true;
+		}
+		else if (bMainMenu)
+		{
+			Button->SetIsEnabled(true);
+			Button->OnClicked.Clear();
+			Button->OnClicked.AddUniqueDynamic(this, &AOreDealTablePlayerController::HandleResultMainMenuClicked);
+			bHasMainMenu = true;
+		}
+		else UnassignedButtons.Add(Button);
+	}
+
+	// Some versions of WBP_Result have text set by a binding after construction. If its text/name
+	// cannot identify the two visible buttons yet, use their on-screen left-to-right positions.
+	if ((!bHasRematch || !bHasMainMenu) && !UnassignedButtons.IsEmpty())
+	{
+		int32 ViewportWidth = 0, ViewportHeight = 0;
+		GetViewportSize(ViewportWidth, ViewportHeight);
+		UnassignedButtons.Sort([](const UButton& A, const UButton& B)
+		{
+			return A.GetCachedGeometry().GetAbsolutePosition().X < B.GetCachedGeometry().GetAbsolutePosition().X;
+		});
+		for (UButton* Button : UnassignedButtons)
+		{
+			if (bHasRematch && bHasMainMenu) break;
+			const float X = Button->GetCachedGeometry().GetAbsolutePosition().X;
+			const bool bLeftSide = ViewportWidth <= 0 ? !bHasRematch : X < ViewportWidth * 0.5f;
+			const bool bBindRematch = bLeftSide ? !bHasRematch : bHasMainMenu;
+			Button->SetIsEnabled(true);
+			Button->OnClicked.Clear();
+			if (bBindRematch)
+			{
+				Button->OnClicked.AddUniqueDynamic(this, &AOreDealTablePlayerController::HandleResultRematchClicked);
+				bHasRematch = true;
+			}
+			else
+			{
+				Button->OnClicked.AddUniqueDynamic(this, &AOreDealTablePlayerController::HandleResultMainMenuClicked);
+				bHasMainMenu = true;
+			}
+		}
+	}
 }
 
 void AOreDealTablePlayerController::ReturnToMainMenu()
@@ -1824,4 +2300,22 @@ void AOreDealTablePlayerController::ReturnToMainMenu()
 	if (!World) return;
 
 	UGameplayStatics::OpenLevel(World, FName(TEXT("Lvl_MainMenu")));
+}
+
+void AOreDealTablePlayerController::RestartCurrentMatch()
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+	const FString CurrentMap = UGameplayStatics::GetCurrentLevelName(World, true);
+	if (!CurrentMap.IsEmpty()) UGameplayStatics::OpenLevel(World, FName(*CurrentMap));
+}
+
+void AOreDealTablePlayerController::HandleResultRematchClicked()
+{
+	RestartCurrentMatch();
+}
+
+void AOreDealTablePlayerController::HandleResultMainMenuClicked()
+{
+	ReturnToMainMenu();
 }

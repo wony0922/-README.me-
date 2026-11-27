@@ -44,6 +44,7 @@ public:
 		FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override;
 
 	void SetChatExpanded(bool bExpanded);
+	bool IsScreenPositionInChat(const FVector2D& ScreenPosition) const;
 	void SetSalesOpen(bool bOpen);
 	bool IsChatExpanded() const { return bChatExpanded; }
 	bool IsSalesOpen() const { return bSalesOpen; }

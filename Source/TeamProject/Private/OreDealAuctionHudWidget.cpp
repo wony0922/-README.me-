@@ -4,29 +4,42 @@
 #include "Components/Border.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Components/Button.h"
+#include "Components/HorizontalBox.h"
+#include "Components/HorizontalBoxSlot.h"
+#include "Components/Image.h"
+#include "Components/Overlay.h"
+#include "Components/OverlaySlot.h"
+#include "Components/SizeBox.h"
+#include "Components/WrapBox.h"
+#include "Components/WrapBoxSlot.h"
 #include "Components/TextBlock.h"
+#include "Components/VerticalBox.h"
 #include "Engine/Texture2D.h"
 
 namespace
 {
-	// Same order as BP_CardBoard.FloatMats and the hand viewer.
-	const TCHAR* AuctionCardTexturePaths[] = {
-		TEXT("/Game/MaterialTraders/Cards/Textures/T_Card_Stone.T_Card_Stone"),
-		TEXT("/Game/MaterialTraders/Cards/Textures/T_Card_Coal.T_Card_Coal"),
-		TEXT("/Game/MaterialTraders/Cards/Textures/T_Card_Gold.T_Card_Gold"),
-		TEXT("/Game/MaterialTraders/Cards/Textures/T_Card_Iron.T_Card_Iron"),
-		TEXT("/Game/MaterialTraders/Cards/Textures/T_Card_Diamond.T_Card_Diamond"),
+	// BP_TradeManager order, with the imported face textures from /Cards.
+	const TCHAR* AuctionHudCardTexturePaths[] = {
+		TEXT("/Game/MaterialTraders/Cards/rock.rock"),
+		TEXT("/Game/MaterialTraders/Cards/coal.coal"),
+		TEXT("/Game/MaterialTraders/Cards/copper.copper"),
+		TEXT("/Game/MaterialTraders/Cards/iron.iron"),
+		TEXT("/Game/MaterialTraders/Cards/silver.silver"),
+		TEXT("/Game/MaterialTraders/Cards/gold.gold"),
+		TEXT("/Game/MaterialTraders/Cards/diamond.diamond"),
+		TEXT("/Game/MaterialTraders/Cards/adamantium.adamantium"),
 	};
 	const TCHAR* AuctionCardBackPath = TEXT("/Game/MaterialTraders/Cards/Textures/T_Card_Back.T_Card_Back");
 
-	constexpr float PickerCardWidth = 110.0f;
-	constexpr float PickerCardHeight = 154.0f;
-	constexpr float PickerStep = 118.0f;
-	constexpr float PickerMaxWidth = 1100.0f;
+	constexpr float PickerCardWidth = 150.0f;
+	constexpr float PickerCardHeight = 210.0f;
+	constexpr float PickerStep = 132.0f;
+	constexpr float PickerMaxWidth = 1200.0f;
 	constexpr float PickerBottom = 40.0f;
 	constexpr float PickerLift = 30.0f;
-	constexpr float PendingCardWidth = 140.0f;
-	constexpr float PendingCardHeight = 196.0f;
+	constexpr float PendingCardWidth = 170.0f;
+	constexpr float PendingCardHeight = 238.0f;
 	constexpr float ScreenMargin = 40.0f;
 
 
@@ -105,7 +118,7 @@ namespace
 void UOreDealAuctionHudWidget::NativeOnInitialized()
 {
 	Super::NativeOnInitialized();
-	for (const TCHAR* Path : AuctionCardTexturePaths) CardTextures.Add(LoadObject<UTexture2D>(nullptr, Path));
+	for (const TCHAR* Path : AuctionHudCardTexturePaths) CardTextures.Add(LoadObject<UTexture2D>(nullptr, Path));
 	CardBackTexture = LoadObject<UTexture2D>(nullptr, AuctionCardBackPath);
 	if (!RootCanvas) BuildRoot();
 	SetVisibility(ESlateVisibility::HitTestInvisible);
@@ -122,17 +135,6 @@ void UOreDealAuctionHudWidget::BuildRoot()
 	if (!WidgetTree) return;
 	RootCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("OreDealAuctionRoot"));
 	WidgetTree->RootWidget = RootCanvas;
-
-	StatusText = MakeLabel(WidgetTree, 19, InkColor);
-	StatusText->SetJustification(ETextJustify::Center);
-	if (UCanvasPanelSlot* StatusSlot = AddFramed(WidgetTree, RootCanvas, StatusText, NotificationBrush(), FMargin(26.0f, 8.0f, 32.0f, 10.0f)))
-	{
-		StatusSlot->SetAnchors(FAnchors(0.5f, 0.0f));
-		StatusSlot->SetAlignment(FVector2D(0.5f, 0.0f));
-		StatusSlot->SetAutoSize(true);
-		StatusSlot->SetPosition(FVector2D(0.0f, 230.0f));
-		StatusSlot->SetZOrder(10);
-	}
 
 	FlashText = MakeLabel(WidgetTree, 24, InkWarn);
 	FlashText->SetJustification(ETextJustify::Center);
@@ -180,6 +182,50 @@ void UOreDealAuctionHudWidget::BuildRoot()
 		TextSlot->SetPosition(FVector2D(-ScreenMargin, 230.0f));
 		TextSlot->SetZOrder(10);
 	}
+
+	TradeModal = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("TradeRequestModal"));
+	TradeModal->SetBrush(ModalBrush());
+	TradeModal->SetPadding(FMargin(28.0f, 24.0f));
+	TradeModal->SetHorizontalAlignment(HAlign_Center);
+	TradeModal->SetVerticalAlignment(VAlign_Center);
+	TradeModal->SetVisibility(ESlateVisibility::Collapsed);
+	if (UCanvasPanelSlot* ModalSlot = RootCanvas->AddChildToCanvas(TradeModal))
+	{
+		ModalSlot->SetAnchors(FAnchors(0.5f, 0.5f));
+		ModalSlot->SetAlignment(FVector2D(0.5f, 0.5f));
+		ModalSlot->SetSize(FVector2D(650.0f, 430.0f));
+		ModalSlot->SetZOrder(1000);
+	}
+	UVerticalBox* ModalContent = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
+	TradeModal->SetContent(ModalContent);
+	TradeModalTextBlock = MakeLabel(WidgetTree, 22, InkColor);
+	TradeModalTextBlock->SetJustification(ETextJustify::Center);
+	TradeModalTextBlock->SetAutoWrapText(true);
+	ModalContent->AddChildToVerticalBox(TradeModalTextBlock);
+	TradeWantedLabel = MakeLabel(WidgetTree, 16, InkColor);
+	TradeWantedLabel->SetText(FText::FromString(TEXT("받을 카드")));
+	ModalContent->AddChildToVerticalBox(TradeWantedLabel);
+	TradeWantedRow = WidgetTree->ConstructWidget<UWrapBox>(UWrapBox::StaticClass());
+	ModalContent->AddChildToVerticalBox(TradeWantedRow);
+	TradeOfferedLabel = MakeLabel(WidgetTree, 16, InkColor);
+	TradeOfferedLabel->SetText(FText::FromString(TEXT("보낼 카드")));
+	ModalContent->AddChildToVerticalBox(TradeOfferedLabel);
+	TradeOfferedRow = WidgetTree->ConstructWidget<UWrapBox>(UWrapBox::StaticClass());
+	ModalContent->AddChildToVerticalBox(TradeOfferedRow);
+	UHorizontalBox* ModalButtons = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
+	ModalContent->AddChildToVerticalBox(ModalButtons);
+	TradeAcceptButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass());
+	TradeRejectButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass());
+	TradeAcceptButton->OnClicked.AddDynamic(this, &UOreDealAuctionHudWidget::HandleTradeAcceptClicked);
+	TradeRejectButton->OnClicked.AddDynamic(this, &UOreDealAuctionHudWidget::HandleTradeRejectClicked);
+	UTextBlock* AcceptLabel = MakeLabel(WidgetTree, 20, InkColor);
+	AcceptLabel->SetText(FText::FromString(TEXT("거래한다")));
+	UTextBlock* RejectLabel = MakeLabel(WidgetTree, 20, InkColor);
+	RejectLabel->SetText(FText::FromString(TEXT("취소한다")));
+	TradeAcceptButton->SetContent(AcceptLabel);
+	TradeRejectButton->SetContent(RejectLabel);
+	if (UHorizontalBoxSlot* AcceptSlot = ModalButtons->AddChildToHorizontalBox(TradeAcceptButton)) AcceptSlot->SetPadding(FMargin(8.0f));
+	if (UHorizontalBoxSlot* RejectSlot = ModalButtons->AddChildToHorizontalBox(TradeRejectButton)) RejectSlot->SetPadding(FMargin(8.0f));
 }
 
 void UOreDealAuctionHudWidget::RebuildPicker(const TArray<int32>& Cards)
@@ -215,12 +261,17 @@ void UOreDealAuctionHudWidget::RebuildPicker(const TArray<int32>& Cards)
 void UOreDealAuctionHudWidget::ApplyState(const FOreDealAuctionHudState& State)
 {
 	if (!RootCanvas) return;
-
-	if (StatusText)
+	SetVisibility(State.bTradeModalVisible ? ESlateVisibility::Visible : ESlateVisibility::HitTestInvisible);
+	if (TradeModal)
 	{
-		StatusText->SetText(FText::FromString(State.Status));
-		StatusText->SetVisibility(State.Status.IsEmpty() ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
+		TradeModal->SetVisibility(State.bTradeModalVisible ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+		TradeModal->SetIsEnabled(State.bTradeModalVisible);
 	}
+	if (TradeModalTextBlock) TradeModalTextBlock->SetText(FText::FromString(State.TradeModalText));
+	if (State.TradeWantedCards != BuiltTradeWantedCards) { RebuildTradeCards(TradeWantedRow, State.TradeWantedCards); BuiltTradeWantedCards = State.TradeWantedCards; }
+	if (State.TradeOfferedCards != BuiltTradeOfferedCards) { RebuildTradeCards(TradeOfferedRow, State.TradeOfferedCards); BuiltTradeOfferedCards = State.TradeOfferedCards; }
+	if (TradeAcceptButton)
+		if (UTextBlock* Label = Cast<UTextBlock>(TradeAcceptButton->GetContent())) Label->SetText(FText::FromString(State.TradeAcceptLabel));
 
 	// Hand picker.
 	const TArray<int32> EmptyCards;
@@ -289,10 +340,48 @@ void UOreDealAuctionHudWidget::ApplyState(const FOreDealAuctionHudState& State)
 			PendingText->SetText(FText::FromString(FString::Printf(TEXT("배치할 카드: %s  ·  %d장 남음\n%s\n%s"), *CardName, State.PendingCards.Num(), *WagonLine, *Controls)));
 		}
 	}
-	SyncFrame(StatusText);
 	SyncFrame(PickerHintText);
 	SyncFrame(PendingText);
 }
+
+void UOreDealAuctionHudWidget::RebuildTradeCards(UWrapBox* Row, const TArray<int32>& Cards)
+{
+	if (!Row || !WidgetTree) return;
+	Row->ClearChildren();
+	TMap<int32, int32> Counts;
+	for (int32 Card : Cards) ++Counts.FindOrAdd(Card);
+	TArray<int32> Resources;
+	Counts.GetKeys(Resources);
+	Resources.Sort();
+	for (int32 Resource : Resources)
+	{
+		USizeBox* Tile = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		Tile->SetWidthOverride(76.0f);
+		Tile->SetHeightOverride(100.0f);
+		UOverlay* Content = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass());
+		UImage* Face = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass());
+		if (UTexture2D* Texture = TextureFor(Resource)) Face->SetBrushFromTexture(Texture);
+		Content->AddChildToOverlay(Face);
+		UTextBlock* Count = MakeLabel(WidgetTree, 18, GoldColor);
+		Count->SetText(FText::FromString(FString::Printf(TEXT("×%d"), Counts.FindRef(Resource))));
+		if (UOverlaySlot* CountSlot = Content->AddChildToOverlay(Count))
+		{
+			CountSlot->SetHorizontalAlignment(HAlign_Right);
+			CountSlot->SetVerticalAlignment(VAlign_Bottom);
+		}
+		Tile->SetContent(Content);
+		if (UWrapBoxSlot* TileSlot = Row->AddChildToWrapBox(Tile)) TileSlot->SetPadding(FMargin(5.0f, 3.0f));
+	}
+}
+
+void UOreDealAuctionHudWidget::SetTradeDecisionCallbacks(FSimpleDelegate OnAccept, FSimpleDelegate OnReject)
+{
+	TradeAcceptDelegate = MoveTemp(OnAccept);
+	TradeRejectDelegate = MoveTemp(OnReject);
+}
+
+void UOreDealAuctionHudWidget::HandleTradeAcceptClicked() { TradeAcceptDelegate.ExecuteIfBound(); }
+void UOreDealAuctionHudWidget::HandleTradeRejectClicked() { TradeRejectDelegate.ExecuteIfBound(); }
 
 void UOreDealAuctionHudWidget::Flash(const FString& Message, float Seconds)
 {

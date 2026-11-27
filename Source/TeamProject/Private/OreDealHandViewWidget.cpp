@@ -10,28 +10,31 @@
 
 namespace
 {
-	// Same order as BP_CardBoard.FloatMats / BP_SeatedPlayer card materials.
-	const TCHAR* CardTexturePaths[] = {
-		TEXT("/Game/MaterialTraders/Cards/Textures/T_Card_Stone.T_Card_Stone"),
-		TEXT("/Game/MaterialTraders/Cards/Textures/T_Card_Coal.T_Card_Coal"),
-		TEXT("/Game/MaterialTraders/Cards/Textures/T_Card_Gold.T_Card_Gold"),
-		TEXT("/Game/MaterialTraders/Cards/Textures/T_Card_Iron.T_Card_Iron"),
-		TEXT("/Game/MaterialTraders/Cards/Textures/T_Card_Diamond.T_Card_Diamond"),
+	// BP_TradeManager order: Rock, Coal, Copper, Iron, Silver, Gold, Diamond, Adamantium.
+	const TCHAR* HandViewCardTexturePaths[] = {
+		TEXT("/Game/MaterialTraders/Cards/rock.rock"),
+		TEXT("/Game/MaterialTraders/Cards/coal.coal"),
+		TEXT("/Game/MaterialTraders/Cards/copper.copper"),
+		TEXT("/Game/MaterialTraders/Cards/iron.iron"),
+		TEXT("/Game/MaterialTraders/Cards/silver.silver"),
+		TEXT("/Game/MaterialTraders/Cards/gold.gold"),
+		TEXT("/Game/MaterialTraders/Cards/diamond.diamond"),
+		TEXT("/Game/MaterialTraders/Cards/adamantium.adamantium"),
 	};
 	const TCHAR* CardBackTexturePath = TEXT("/Game/MaterialTraders/Cards/Textures/T_Card_Back.T_Card_Back");
 
-	constexpr float CardWidth = 150.0f;
-	constexpr float CardHeight = 210.0f;          // T_Card_* is 744 x 1039
-	constexpr float CardStep = 63.0f;             // 42% of the width: neighbours overlap the focus card by more than half
+	constexpr float HandViewCardWidth = 200.0f;
+	constexpr float HandViewCardHeight = 280.0f;
+	constexpr float CardStep = 82.0f;             // Keep the hand compact while making each face readable.
 	constexpr float HandViewScreenMargin = 30.0f;
 	constexpr int32 VisibleEachSide = 3;
 	constexpr float FocusScale = 1.12f;
 	constexpr float NeighbourScale = 0.86f;
 	constexpr float ScaleFalloff = 0.05f;
 	constexpr float MinScale = 0.72f;
-	constexpr float MoveSpeed = 14.0f;
+	constexpr float HandViewMoveSpeed = 14.0f;
 	// Leaves room on the left for three earlier cards at their smallest visible scale.
-	constexpr float FocusCenterX = HandViewScreenMargin + VisibleEachSide * CardStep + (NeighbourScale - ScaleFalloff * (VisibleEachSide - 1)) * CardWidth * 0.5f;
+	constexpr float FocusCenterX = HandViewScreenMargin + VisibleEachSide * CardStep + (NeighbourScale - ScaleFalloff * (VisibleEachSide - 1)) * HandViewCardWidth * 0.5f;
 
 	float ScaleForOffset(float Offset)
 	{
@@ -79,7 +82,7 @@ void UOreDealHandViewWidget::BuildRoot()
 		HintSlot->SetAnchors(FAnchors(0.0f, 1.0f));
 		HintSlot->SetAlignment(FVector2D(0.0f, 1.0f));
 		HintSlot->SetAutoSize(true);
-		HintSlot->SetPosition(FVector2D(HandViewScreenMargin, -(HandViewScreenMargin + CardHeight * FocusScale + 10.0f)));
+		HintSlot->SetPosition(FVector2D(HandViewScreenMargin, -(HandViewScreenMargin + HandViewCardHeight * FocusScale + 10.0f)));
 		HintSlot->SetZOrder(1000);
 	}
 }
@@ -87,7 +90,7 @@ void UOreDealHandViewWidget::BuildRoot()
 void UOreDealHandViewWidget::LoadTextures()
 {
 	CardTextures.Reset();
-	for (const TCHAR* Path : CardTexturePaths) CardTextures.Add(LoadObject<UTexture2D>(nullptr, Path));
+	for (const TCHAR* Path : HandViewCardTexturePaths) CardTextures.Add(LoadObject<UTexture2D>(nullptr, Path));
 	CardBackTexture = LoadObject<UTexture2D>(nullptr, CardBackTexturePath);
 }
 
@@ -156,8 +159,8 @@ void UOreDealHandViewWidget::RebuildCards()
 		Card->SetHorizontalAlignment(HAlign_Left);
 		Card->SetVerticalAlignment(VAlign_Top);
 		UTextBlock* Number = MakeHandLabel(WidgetTree, 14);
-		static const TCHAR* ResourceNames[] = { TEXT("Rock"), TEXT("Coal"), TEXT("Copper"), TEXT("Iron"), TEXT("Silver"), TEXT("Gold"), TEXT("Diamond"), TEXT("Adamantium") };
-	const FString ResourceName = Resource >= 0 && Resource < UE_ARRAY_COUNT(ResourceNames) ? FString(ResourceNames[Resource]) : FString(TEXT("?"));
+	static const TCHAR* HandViewResourceNames[] = { TEXT("Rock"), TEXT("Coal"), TEXT("Copper"), TEXT("Iron"), TEXT("Silver"), TEXT("Gold"), TEXT("Diamond"), TEXT("Adamantium") };
+	const FString ResourceName = Resource >= 0 && Resource < UE_ARRAY_COUNT(HandViewResourceNames) ? FString(HandViewResourceNames[Resource]) : FString(TEXT("?"));
 		Number->SetText(FText::FromString(FString::Printf(TEXT("%s\n%02d"), *ResourceName, Index + 1)));
 		Card->SetContent(Number);
 		Card->SetRenderTransformPivot(FVector2D(0.5f, 1.0f));
@@ -166,7 +169,7 @@ void UOreDealHandViewWidget::RebuildCards()
 		{
 			CardSlot->SetAnchors(FAnchors(0.0f, 1.0f));
 			CardSlot->SetAlignment(FVector2D(0.5f, 1.0f));
-			CardSlot->SetSize(FVector2D(CardWidth, CardHeight));
+			CardSlot->SetSize(FVector2D(HandViewCardWidth, HandViewCardHeight));
 		}
 		CardWidgets.Add(Card);
 		CardNumbers.Add(Number);
@@ -182,7 +185,7 @@ void UOreDealHandViewWidget::UpdateLayout(float DeltaTime, bool bSnap)
 		UBorder* Card = CardWidgets[Index];
 		if (!Card || !DisplayOffsets.IsValidIndex(Index)) continue;
 		const float Target = static_cast<float>(Index - FocusIndex);
-		DisplayOffsets[Index] = bSnap ? Target : FMath::FInterpTo(DisplayOffsets[Index], Target, DeltaTime, MoveSpeed);
+		DisplayOffsets[Index] = bSnap ? Target : FMath::FInterpTo(DisplayOffsets[Index], Target, DeltaTime, HandViewMoveSpeed);
 		const float Offset = DisplayOffsets[Index];
 		const float Scale = ScaleForOffset(Offset);
 		const float Opacity = OpacityForOffset(Offset);
